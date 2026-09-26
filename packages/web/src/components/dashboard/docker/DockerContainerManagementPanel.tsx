@@ -276,7 +276,7 @@ export function DockerContainerManagementPanel({
           Container management
         </h3>
         <p className="mt-1 text-[11px] leading-relaxed text-white/45">
-          Management controls stay hidden until Docker monitoring is enabled.
+          Management controls stay hidden until Docker management is enabled.
         </p>
       </section>
     );

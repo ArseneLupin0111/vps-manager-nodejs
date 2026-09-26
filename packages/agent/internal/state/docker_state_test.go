@@ -369,6 +369,98 @@ func TestPendingIdempotentAndConflict(t *testing.T) {
 	assertNoTempLeftovers(t, filepath.Dir(p2))
 }
 
+// ReserveSequence must durably advance the sequence before handing out the
+// value, so a restart can never reissue a sequence already transmitted on
+// the wire (the server rejects a duplicate with HTTP 500).
+func TestReserveSequenceDurableMonotonic(t *testing.T) {
+	p := testPath(t)
+	s := mustStore(t, p)
+	first, err := s.ReserveSequence()
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if s.Sequence() != first+1 {
+		t.Fatalf("in-memory sequence = %d, want pre-bump value %d advanced to %d", s.Sequence(), first, first+1)
+	}
+	second, err := s.ReserveSequence()
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if second != first+1 {
+		t.Fatalf("second reserve = %d, want %d (strictly increasing)", second, first+1)
+	}
+	// The advance must be durable, not process-local: a fresh handle on the
+	// same file sees it and keeps allocating above every prior value.
+	re := mustStore(t, p)
+	if re.Sequence() != second+1 {
+		t.Fatalf("reloaded sequence = %d, want %d", re.Sequence(), second+1)
+	}
+	third, err := re.ReserveSequence()
+	if err != nil {
+		t.Fatalf("post-restart reserve: %v", err)
+	}
+	if third != second+1 {
+		t.Fatalf("post-restart reserve = %d, must exceed pre-restart values (max %d)", third, second)
+	}
+}
+
+// A reservation touches only the sequence: pending replay bytes and the
+// watermark stay unchanged, the advance is durable, and the ack path still
+// commits normally afterwards.
+func TestReserveSequencePreservesPendingAndWatermark(t *testing.T) {
+	p := testPath(t)
+	s := mustStore(t, p)
+	prop := Watermark{TimeNano: 100, BoundaryDigests: []string{}}
+	if err := s.PersistPending(makePending(s, "b1", "snap1", prop)); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	if s.GetPending() == nil {
+		t.Fatal("pending missing")
+	}
+	before := *s.GetPending()
+	reserved, err := s.ReserveSequence()
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if reserved != s.Sequence()-1 {
+		t.Fatalf("reserve returned %d, want pre-bump value %d", reserved, s.Sequence()-1)
+	}
+	after := s.GetPending()
+	if after == nil {
+		t.Fatal("reserve must not drop pending")
+	}
+	if after.BatchID != before.BatchID || after.SnapshotID != before.SnapshotID ||
+		after.SourceSequence != before.SourceSequence ||
+		after.PendingPayloadJSON != before.PendingPayloadJSON ||
+		after.PendingPayloadDigest != before.PendingPayloadDigest {
+		t.Fatalf("reserve must preserve pending replay bytes\n before=%+v\n after=%+v", before, *after)
+	}
+	if got := s.GetWatermark(); got.TimeNano != 0 || len(got.BoundaryDigests) != 0 {
+		t.Fatalf("reserve must not advance watermark, got %+v", got)
+	}
+	// Durable before return: reload sees the advanced sequence, the intact
+	// pending, and an untouched watermark.
+	re := mustStore(t, p)
+	if re.Sequence() != s.Sequence() {
+		t.Fatalf("reloaded sequence = %d, want %d", re.Sequence(), s.Sequence())
+	}
+	rp := re.GetPending()
+	if rp == nil || rp.PendingPayloadJSON != before.PendingPayloadJSON || rp.SourceSequence != before.SourceSequence {
+		t.Fatalf("reloaded pending must keep exact replay bytes, got %+v", rp)
+	}
+	// Ack path unaffected by the reservation: commit still succeeds.
+	if err := re.CommitAcknowledgement("b1", "snap1", re.InstanceID(), prop); err != nil {
+		t.Fatalf("commit after reserve: %v", err)
+	}
+	if re.GetPending() != nil {
+		t.Fatal("pending must clear on commit")
+	}
+	if got := re.GetWatermark().TimeNano; got != 100 {
+		t.Fatalf("committed watermark after reload = %d, want 100", got)
+	}
+	assertNoTempLeftovers(t, filepath.Dir(p))
+}
+
 func TestCommitMismatchedAck(t *testing.T) {
 	p := testPath(t)
 	s := mustStore(t, p)

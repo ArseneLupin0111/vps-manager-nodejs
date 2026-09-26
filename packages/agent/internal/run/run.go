@@ -37,10 +37,11 @@ type MetricsPusher interface {
 
 // DockerState is the narrow durable-state contract needed by the Runner.
 // It is implemented by *state.Store methods already present; the Runner
-// uses only these five methods and never touches state files directly.
+// never touches state files directly.
 type DockerState interface {
 	InstanceID() string
 	Sequence() uint64
+	ReserveSequence() (uint64, error)
 	GetWatermark() state.Watermark
 	GetPending() *state.PendingBatch
 	PersistPending(state.PendingBatch) error
@@ -82,7 +83,11 @@ func (r *Runner) SetDockerState(st DockerState) {
 	r.docker = st
 }
 
-// FinalizeDocker attaches durable identity and event-protocol metadata before PersistPending.
+// FinalizeDocker attaches durable identity and event-protocol metadata before
+// PersistPending. The stamped sourceSequence is provisional: pushWithState
+// rebinds every fresh snapshot at push time (minimal cycles to a durably
+// reserved sequence, complete batches to the durable sequence) because the
+// stamp alone repeats across cycles that never persist or commit.
 func FinalizeDocker(st DockerState) func(*metrics.DockerMetrics) {
 	return func(batch *metrics.DockerMetrics) {
 		if batch == nil || st == nil {
@@ -205,9 +210,14 @@ func (r *Runner) collectAndPush(ctx context.Context) error {
 // and the durable payload must still be replayed until acknowledged. A
 // runner without durable state never emits a Docker branch (fail closed:
 // there is no identity to bind); host metrics always push. A complete fresh
-// batch persists the exact marshalled branch before push, replays the exact
-// durable payload after restart, validates the typed ack, and commits only
-// on the matching committed watermark.
+// batch binds the durable sequence and persists the exact marshalled branch
+// before push (the persist bump keeps the counter above the bound value),
+// replays the exact durable payload after restart, validates the typed ack,
+// and commits only on the matching committed watermark. A minimal fresh
+// snapshot (identity only, no event branch) durably reserves its sequence
+// before push: minimal cycles never persist or commit, so without the
+// reservation the finalize-time stamp would repeat the same value every
+// cycle and after every restart, which the server rejects as a duplicate.
 func (r *Runner) pushWithState(ctx context.Context, m *metrics.SystemMetrics) error {
 	if r.docker != nil {
 		if existing := r.docker.GetPending(); existing != nil {
@@ -242,15 +252,31 @@ func (r *Runner) pushWithState(ctx context.Context, m *metrics.SystemMetrics) er
 	batch := m.Docker
 	if !isCompleteBatch(batch) {
 		// Minimal snapshot (identity attached by the finalize hook) or a
-		// stripped branch: push with no state interaction.
+		// stripped branch: no pending interaction, but each distinct
+		// snapshotId must carry a distinct sourceSequence. Durably reserve
+		// one first so a restart can never reissue it; if the reservation
+		// cannot be written, push nothing — transmitting the finalize-time
+		// stamp would duplicate a sequence the server already ingested.
+		if batch != nil && r.docker != nil {
+			reserved, err := r.docker.ReserveSequence()
+			if err != nil {
+				log.Printf("docker: reserve source sequence failed, refusing stale-stamp push: %v", err)
+				return fmt.Errorf("docker: reserve sequence: %w", err)
+			}
+			batch.SourceSequence = strconv.FormatUint(reserved, 10)
+		}
 		if _, err := r.pusher.PushWithRetry(ctx, m); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	// No existing pending: bind the batch to the current durable sequence
-	// before marshaling; this value is then preserved in pending JSON.
+	// No existing pending: bind the batch to the durable sequence before
+	// marshaling; this value is then preserved in pending JSON and replayed
+	// unchanged on retry. Every path that transmits a sequence has already
+	// durably advanced the counter past it (reserve-before-push for minimal,
+	// persist/commit around the batch), so this read is strictly above every
+	// previously transmitted value — including across restarts.
 	batch.SourceSequence = strconv.FormatUint(r.docker.Sequence(), 10)
 	// marshal the exact branch with stable JSON, compute its digest, and
 	// durably persist payload plus metadata before push.

@@ -311,6 +311,34 @@ func (s *Store) CommitAcknowledgement(batchID, snapshotID, agentInstanceID strin
 	return nil
 }
 
+// ReserveSequence durably allocates the next source sequence for a fresh
+// snapshot that carries no pending batch (a minimal Docker cycle). It
+// returns the current sequence and atomically advances the durable counter
+// by one — pending, watermark, and identity are untouched, so pending
+// replay/ack invariants hold. Because the bump is durable before the value
+// is handed out, a restart can never reissue a sequence this store already
+// returned or bound to a batch: every later ReserveSequence/Sequence read
+// stays strictly above every previously transmitted value. On write failure
+// nothing changes in memory or on disk and the error is returned.
+func (s *Store) ReserveSequence() (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reserved := s.sequence
+	if s.splitIdentity {
+		next := DeliveryState{Version: IdentityVersion, Watermark: cloneWatermark(s.watermark), Pending: clonePending(s.pending), Sequence: s.sequence + 1}
+		if err := atomicReplaceDelivery(s.path, next, s.deliveryKey[:]); err != nil {
+			return 0, fmt.Errorf("state: reserve sequence: %w", err)
+		}
+	} else {
+		next := persistedState{Version: StateVersion, InstallationKey: base64.RawURLEncoding.EncodeToString(s.key[:]), Watermark: cloneWatermark(s.watermark), Pending: clonePending(s.pending), Sequence: s.sequence + 1}
+		if err := atomicReplace(s.path, next); err != nil {
+			return 0, fmt.Errorf("state: reserve sequence: %w", err)
+		}
+	}
+	s.sequence++
+	return reserved, nil
+}
+
 // ---- derivation ----
 
 func deriveAgentInstanceID(key []byte) string {

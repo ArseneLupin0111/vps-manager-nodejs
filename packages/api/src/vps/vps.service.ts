@@ -136,37 +136,63 @@ export class VpsService {
     this.assertNotDemo();
     const vps = await this.get(id);
 
-    // For local/system-managed hosts: only allow exactly { dockerMetricsEnabled: boolean }
+    // For local/system-managed hosts: only the Docker toggles are allowed.
+    // Each flag is persisted independently, so a management-only patch never
+    // cleans up monitoring history and never flips dockerMetricsEnabled.
     if (this.isLocalSystemManaged(vps)) {
       const localPatch = updateLocalVpsSchema.parse(body);
-      const oldValue = vps.dockerMetricsEnabled ?? false;
-      const newValue = localPatch.dockerMetricsEnabled;
+      const oldMetrics = vps.dockerMetricsEnabled ?? false;
+      const oldManagement = vps.dockerManagementEnabled ?? false;
+      const newMetrics = localPatch.dockerMetricsEnabled;
+      const newManagement = localPatch.dockerManagementEnabled;
+      const metricsChanged =
+        newMetrics !== undefined && newMetrics !== oldMetrics;
+      const managementChanged =
+        newManagement !== undefined && newManagement !== oldManagement;
 
-      if (oldValue === newValue) {
+      if (!metricsChanged && !managementChanged) {
         // No change; just return current record
         return vps;
       }
 
-      // Clean up first: if cleanup fails, leave the toggle enabled so the
+      // Clean up monitoring history only on an explicit metrics disable
+      // transition. If cleanup fails, leave the toggle enabled so the
       // persisted configuration remains consistent and the request is retryable.
-      if (!newValue) {
+      if (oldMetrics && newMetrics === false) {
         await this.dockerMonitoring?.cleanupForVps(id, "monitoring_disabled");
       }
 
       const updated = await this.store.update(id, {
-        dockerMetricsEnabled: newValue,
+        ...(newMetrics !== undefined
+          ? { dockerMetricsEnabled: newMetrics }
+          : {}),
+        ...(newManagement !== undefined
+          ? { dockerManagementEnabled: newManagement }
+          : {}),
       });
       if (!updated) throw new VpsNotFoundError();
 
       await this.audit.record({
         actor: "system",
-        action: "vps.docker_metrics.update",
+        action: metricsChanged
+          ? "vps.docker_metrics.update"
+          : "vps.docker_management.update",
         resourceType: "vps",
         resourceId: id,
         result: "success",
         metadata: {
-          old: { dockerMetricsEnabled: oldValue },
-          new: { dockerMetricsEnabled: newValue },
+          old: {
+            ...(metricsChanged ? { dockerMetricsEnabled: oldMetrics } : {}),
+            ...(managementChanged
+              ? { dockerManagementEnabled: oldManagement }
+              : {}),
+          },
+          new: {
+            ...(metricsChanged ? { dockerMetricsEnabled: newMetrics } : {}),
+            ...(managementChanged
+              ? { dockerManagementEnabled: newManagement }
+              : {}),
+          },
         },
       });
       return updated;

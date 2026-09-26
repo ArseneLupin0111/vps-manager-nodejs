@@ -401,6 +401,264 @@ func TestFinalizeDocker_AssignsIdentityAndOnlyCompleteBatchID(t *testing.T) {
 	}
 }
 
+// minimalSnapshotCollector mints a fresh identity-stamped minimal snapshot on
+// every Collect exactly like production: FinalizeDocker attaches durable
+// identity (including the provisional sourceSequence stamp) and no event
+// branch, so isCompleteBatch stays false.
+type minimalSnapshotCollector struct {
+	st DockerState
+}
+
+func (c *minimalSnapshotCollector) Collect(ctx context.Context) (*metrics.SystemMetrics, error) {
+	snap := &metrics.DockerMetrics{
+		CollectedAt:   time.Now().UTC().Format(time.RFC3339),
+		SchemaVersion: metrics.DockerMetricsSchemaVersion,
+		Available:     true,
+	}
+	FinalizeDocker(c.st)(snap)
+	return &metrics.SystemMetrics{CPU: 50, Memory: 60, Disk: 70, LoadAverage: 0.5, Docker: snap}, nil
+}
+
+func parseSequence(t *testing.T, cycle int, seq string) uint64 {
+	t.Helper()
+	n, err := strconv.ParseUint(seq, 10, 64)
+	if err != nil || n == 0 {
+		t.Fatalf("cycle %d: sourceSequence %q must be positive canonical decimal", cycle, seq)
+	}
+	return n
+}
+
+// Production regression: minimal snapshots never persist or commit, so the
+// finalize-time stamp repeats the same durable sequence on every cycle. The
+// server keys ledger uniqueness on (agentInstanceId, sourceSequence) — a
+// repeated value is rejected with HTTP 500 and the Docker chart stops after
+// the first sample. Consecutive minimal collections must ingest with
+// distinct, strictly increasing sequences while durable state stays
+// untouched (no pending may appear).
+func TestDocker_MinimalCycles_TransmitDistinctIncreasingSequences(t *testing.T) {
+	s := mustState(t)
+	type wire struct{ snap, seq string }
+	var sent []wire
+	pusher := &mockPusher{
+		handler: func(got *metrics.SystemMetrics) (*push.PushResult, error) {
+			if got.Docker == nil {
+				t.Fatal("minimal cycle must carry the docker branch")
+			}
+			sent = append(sent, wire{snap: got.Docker.SnapshotID, seq: got.Docker.SourceSequence})
+			return okResult(), nil
+		},
+	}
+	runner := NewWithState(createTestConfig(), &minimalSnapshotCollector{st: s}, pusher, s)
+	for i := 1; i <= 3; i++ {
+		if err := runner.RunOnce(context.Background()); err != nil {
+			t.Fatalf("minimal cycle %d: %v", i, err)
+		}
+	}
+	if len(sent) != 3 {
+		t.Fatalf("expected 3 pushed snapshots, got %d", len(sent))
+	}
+	var last uint64
+	for i, p := range sent {
+		n := parseSequence(t, i+1, p.seq)
+		if i > 0 && n <= last {
+			t.Fatalf("cycle %d: sourceSequence %d must exceed previous %d (duplicate is rejected, smaller is replay_ignored)", i+1, n, last)
+		}
+		if p.snap == "" {
+			t.Fatalf("cycle %d: fresh snapshotId missing", i+1)
+		}
+		for j := 0; j < i; j++ {
+			if p.snap == sent[j].snap {
+				t.Fatalf("cycle %d: snapshotId must be fresh, duplicated %q", i+1, p.snap)
+			}
+		}
+		last = n
+	}
+	if s.GetPending() != nil {
+		t.Fatal("minimal cycles must never create a pending batch")
+	}
+}
+
+// Minimal and complete snapshots share one wire ordering. After minimal
+// cycles consume increasing sequences, a complete batch must still persist,
+// fail, replay its exact durable bytes (stored sequence included — never a
+// fresh allocation), and commit; the next minimal cycle must then sit above
+// the committed batch so the server neither duplicates nor replay_ignores it.
+func TestDocker_MinimalCompleteInterleave_ReplayExactAndSequencesIncrease(t *testing.T) {
+	s := mustState(t)
+	var seqs []string
+	var pushedJSON []string
+	completeAttempts := 0
+	pusher := &mockPusher{
+		handler: func(got *metrics.SystemMetrics) (*push.PushResult, error) {
+			if got.Docker == nil {
+				t.Fatal("every cycle must carry the docker branch")
+			}
+			b, err := json.Marshal(got.Docker)
+			if err != nil {
+				t.Fatalf("marshal docker: %v", err)
+			}
+			seqs = append(seqs, got.Docker.SourceSequence)
+			pushedJSON = append(pushedJSON, string(b))
+			if got.Docker.BatchID == "" {
+				return okResult(), nil
+			}
+			completeAttempts++
+			if completeAttempts == 1 {
+				// Crash-after-persist: first complete push fails at transport.
+				return nil, &push.ErrRetryable{StatusCode: 500, Err: errors.New("boom")}
+			}
+			return ackFor("test-vps", "b1", "s1", s.InstanceID(), "committed", "100"), nil
+		},
+	}
+	runner := NewWithState(createTestConfig(), &minimalSnapshotCollector{st: s}, pusher, s)
+
+	// Cycles 1-2: two minimal collections, no durable interaction.
+	for i := 1; i <= 2; i++ {
+		if err := runner.RunOnce(context.Background()); err != nil {
+			t.Fatalf("minimal cycle %d: %v", i, err)
+		}
+	}
+	// Cycle 3: complete batch persists then fails at transport.
+	runner.collector = &mockCollector{metrics: makeBatch(s, "b1", "s1", 100)}
+	if err := runner.RunOnce(context.Background()); err == nil {
+		t.Fatal("expected transport failure on first complete push")
+	}
+	if s.GetPending() == nil {
+		t.Fatal("pending must exist after persist + transport failure")
+	}
+	// Cycle 4: fresh collection is minimal, but the durable pending must
+	// replay byte-identically (stored sequence included) and commit.
+	runner.collector = &minimalSnapshotCollector{st: s}
+	if err := runner.RunOnce(context.Background()); err != nil {
+		t.Fatalf("pending replay must succeed: %v", err)
+	}
+	if pushedJSON[3] != pushedJSON[2] {
+		t.Fatalf("replay must carry exact pending bytes:\n got=%s\nwant=%s", pushedJSON[3], pushedJSON[2])
+	}
+	if s.GetPending() != nil {
+		t.Fatal("pending must be cleared after ack commit")
+	}
+	if got := s.GetWatermark(); got.TimeNano != 100 {
+		t.Fatalf("watermark = %+v, want 100", got)
+	}
+	// Cycle 5: next minimal collection must sit above the committed batch.
+	if err := runner.RunOnce(context.Background()); err != nil {
+		t.Fatalf("minimal cycle 5: %v", err)
+	}
+	if len(seqs) != 5 {
+		t.Fatalf("expected 5 pushed snapshots, got %d", len(seqs))
+	}
+	// Fresh snapshots (pushes 1, 2, 3, 5) must strictly increase; push 4 is
+	// the durable replay, which by contract re-sends the identical payload
+	// (asserted above), stored sequence included.
+	var last uint64
+	for _, idx := range []int{0, 1, 2, 4} {
+		n := parseSequence(t, idx+1, seqs[idx])
+		if n <= last {
+			t.Fatalf("push %d: sourceSequence %d must exceed previous fresh %d", idx+1, n, last)
+		}
+		last = n
+	}
+}
+
+// Production regression: minimal-only pushes across a process restart must
+// keep the wire ordering strictly increasing. The reservation has to be
+// durable — a process-local counter re-seeds from the durable floor on
+// restart, and with minimal cycles never committing, that floor still holds
+// an already-transmitted value, which the server rejects with HTTP 500.
+func TestDocker_MinimalRestart_KeepsSequencesStrictlyIncreasing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docker-state.json")
+	s1, err := state.LoadOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pre []string
+	pusher1 := &mockPusher{
+		handler: func(got *metrics.SystemMetrics) (*push.PushResult, error) {
+			pre = append(pre, got.Docker.SourceSequence)
+			return okResult(), nil
+		},
+	}
+	r1 := NewWithState(createTestConfig(), &minimalSnapshotCollector{st: s1}, pusher1, s1)
+	for i := 1; i <= 3; i++ {
+		if err := r1.RunOnce(context.Background()); err != nil {
+			t.Fatalf("pre-restart minimal cycle %d: %v", i, err)
+		}
+	}
+	if len(pre) != 3 {
+		t.Fatalf("expected 3 pre-restart pushes, got %d", len(pre))
+	}
+	// Simulate process restart: fresh durable handle + fresh runner. The
+	// allocation floor must come from disk, not from dead process memory.
+	s2, err := state.LoadOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var post []string
+	pusher2 := &mockPusher{
+		handler: func(got *metrics.SystemMetrics) (*push.PushResult, error) {
+			post = append(post, got.Docker.SourceSequence)
+			return okResult(), nil
+		},
+	}
+	r2 := NewWithState(createTestConfig(), &minimalSnapshotCollector{st: s2}, pusher2, s2)
+	for i := 1; i <= 2; i++ {
+		if err := r2.RunOnce(context.Background()); err != nil {
+			t.Fatalf("post-restart minimal cycle %d: %v", i, err)
+		}
+	}
+	if len(post) != 2 {
+		t.Fatalf("expected 2 post-restart pushes, got %d", len(post))
+	}
+	all := append(append([]string{}, pre...), post...)
+	var last uint64
+	for i, seq := range all {
+		n := parseSequence(t, i+1, seq)
+		if i > 0 && n <= last {
+			t.Fatalf("push %d: sourceSequence %d must exceed previous %d across restart (duplicate is rejected with HTTP 500)", i+1, n, last)
+		}
+		last = n
+	}
+	if s2.GetPending() != nil {
+		t.Fatal("minimal cycles must never create pending")
+	}
+}
+
+// failReserve simulates an unhealthy state store during minimal reservation.
+type failReserve struct {
+	DockerState
+	err error
+}
+
+func (f *failReserve) ReserveSequence() (uint64, error) { return 0, f.err }
+
+// A minimal cycle must fail closed when the durable reservation cannot be
+// written: pushing the finalize-time stamp would risk a duplicate
+// sourceSequence (HTTP 500), so nothing may be transmitted that cycle.
+func TestDocker_MinimalReserveError_PushesNothing(t *testing.T) {
+	s := mustState(t)
+	var pushed int
+	pusher := &mockPusher{
+		handler: func(got *metrics.SystemMetrics) (*push.PushResult, error) {
+			pushed++
+			return okResult(), nil
+		},
+	}
+	st := &failReserve{DockerState: s, err: errors.New("disk full")}
+	runner := NewWithState(createTestConfig(), &minimalSnapshotCollector{st: st}, pusher, st)
+	err := runner.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected reservation error")
+	}
+	if !strings.Contains(err.Error(), "reserve sequence") {
+		t.Fatalf("error must identify the reservation failure: %v", err)
+	}
+	if pushed != 0 {
+		t.Fatalf("reservation failure must push nothing, got %d pushes", pushed)
+	}
+}
+
 func TestDocker_SuccessCommits(t *testing.T) {
 	s := mustState(t)
 	m := makeBatch(s, "b1", "s1", 100)
