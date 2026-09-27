@@ -49,6 +49,9 @@ func (c *Config) Validate() error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("backendUrl scheme must be http or https, got %q", u.Scheme)
 	}
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("backendUrl must use https (http is only allowed for loopback, got %q)", u.Host)
+	}
 
 	if c.VpsId == "" {
 		return fmt.Errorf("vpsId is required")
@@ -67,6 +70,17 @@ func (c *Config) Validate() error {
 	c.BackendUrl = strings.TrimRight(c.BackendUrl, "/")
 
 	return nil
+}
+
+// isLoopbackHost reports whether host is a loopback name or literal; only
+// these may use a plain http backendUrl (local development / same-host
+// deployments). Everything else must be https.
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }
 
 // String returns a sanitized representation that never includes the token.

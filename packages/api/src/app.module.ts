@@ -45,6 +45,10 @@ import { AgentRestartService } from "./agents/agent-restart.service.js";
 import { AgentRotationService } from "./agents/agent-rotation.service.js";
 import { LocalAgentRotationHelper } from "./agents/local-agent-rotation-helper.service.js";
 import { AgentService } from "./agents/agent.service.js";
+import { LocalUpgradeController } from "./local-upgrade/local-upgrade.controller.js";
+import { LocalUpgradeService } from "./local-upgrade/local-upgrade.service.js";
+import { LocalUpdaterController } from "./local-upgrade/local-updater.controller.js";
+import { RELEASE_CATALOG, ReleaseCatalogService } from "./release/index.js";
 import { JobActivityService } from "./jobs/job-activity.service.js";
 import { VpsService } from "./vps/vps.service.js";
 import type { VpsRepository } from "./persistence/repositories/vps.repository.js";
@@ -58,6 +62,7 @@ import { DockerMonitoringMaintenanceService } from "./docker/docker-monitoring-m
 import { DockerActivityService } from "./docker/docker-activity.service.js";
 import type { DockerMonitoringRepository } from "./persistence/repositories/docker-monitoring.repository.js";
 import type { DockerManagementRepository } from "./persistence/repositories/docker-management.repository.js";
+import type { LocalUpgradeRepository } from "./persistence/repositories/local-upgrade.repository.js";
 import {
   ADMIN_CREDENTIAL_REPOSITORY,
   AGENT_REPOSITORY,
@@ -69,6 +74,7 @@ import {
   HOST_KEY_PIN_REPOSITORY,
   JOB_REPOSITORY,
   KEY_SERVICE,
+  LOCAL_UPGRADE_REPOSITORY,
   METRIC_REPOSITORY,
   SESSION_REPOSITORY,
   VPS_REPOSITORY,
@@ -85,6 +91,7 @@ export {
   HOST_KEY_PIN_REPOSITORY,
   JOB_REPOSITORY,
   KEY_SERVICE,
+  LOCAL_UPGRADE_REPOSITORY,
   METRIC_REPOSITORY,
   SESSION_REPOSITORY,
   VPS_REPOSITORY,
@@ -105,6 +112,7 @@ export type AppDependencies = {
   hostKeyPins?: HostKeyPinRepository;
   dockerMonitoring?: DockerMonitoringRepository;
   dockerManagement?: DockerManagementRepository;
+  localUpgrades?: LocalUpgradeRepository;
   /** Optional pre-created DB pool. Caller owns lifecycle unless ownsPool=true. */
   pool?: Pool;
   ownsPool?: boolean;
@@ -139,7 +147,8 @@ export function createAppModule(deps: AppDependencies = {}): DynamicModule {
     !deps.adminCredential ||
     !deps.hostKeyPins ||
     !deps.dockerMonitoring ||
-    !deps.dockerManagement;
+    !deps.dockerManagement ||
+    !deps.localUpgrades;
   const repositories = needsRepositories
     ? createRepositories(config, deps.pool)
     : undefined;
@@ -162,6 +171,8 @@ export function createAppModule(deps: AppDependencies = {}): DynamicModule {
       AuthController,
       DockerMonitoringController,
       DockerManagementController,
+      LocalUpgradeController,
+      LocalUpdaterController,
     ],
     providers: [
       { provide: APP_CONFIG, useValue: config },
@@ -254,6 +265,13 @@ export function createAppModule(deps: AppDependencies = {}): DynamicModule {
         provide: DOCKER_MANAGEMENT_REPOSITORY,
         useValue: deps.dockerManagement ?? repositories!.dockerManagement,
       },
+      {
+        provide: LOCAL_UPGRADE_REPOSITORY,
+        useValue: deps.localUpgrades ?? repositories!.localUpgrades,
+      },
+      ReleaseCatalogService,
+      { provide: RELEASE_CATALOG, useExisting: ReleaseCatalogService },
+      LocalUpgradeService,
        DockerActivityService,
        DockerMonitoringService,
        DockerManagementService,

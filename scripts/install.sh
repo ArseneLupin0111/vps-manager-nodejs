@@ -582,3 +582,9 @@ echo "Stop:      docker compose -f ${COMPOSE_FILE} down"
 echo "Upgrade:   docker compose -f ${COMPOSE_FILE} pull && docker compose -f ${COMPOSE_FILE} up -d"
 echo "Uninstall agent: sudo systemctl disable --now ${AGENT_SERVICE_NAME}; sudo rm -f /etc/systemd/system/${AGENT_SERVICE_NAME}.service /usr/local/bin/vps-manager-agent; sudo rm -rf /etc/vps-manager-agent"
 echo "Uninstall app:   docker compose -f ${COMPOSE_FILE} down    # add -v and rm -rf ${APP_DIR} only if you want to purge data"
+echo ""
+# Runbook pointer (plan §5): the app never silently upgrades the local
+# agent or the updater; both stay operator-driven.
+echo "Local agent/updater upgrades are NEVER automatic (plan §5)."
+echo "  Manual updater bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> --sha256 <hex-from-signed-manifest>"
+echo "  Offline runbook:          docs/local-agent-upgrade-plan.md"

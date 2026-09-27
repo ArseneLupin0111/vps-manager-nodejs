@@ -29,11 +29,17 @@ export function createMutationRateLimit(
     next: NextFunction,
   ) {
     if (!["POST", "PATCH", "DELETE"].includes(req.method)) return next();
-    if (!req.path.startsWith("/api/vps") && !req.path.startsWith("/api/agent"))
+    if (
+      !req.path.startsWith("/api/vps") &&
+      !req.path.startsWith("/api/agent") &&
+      !req.path.startsWith("/api/local-updater")
+    )
       return next();
 
     const ipKey = req.ip || "unknown";
-    const isAgent = req.path.startsWith("/api/agent");
+    const isAgent =
+      req.path.startsWith("/api/agent") ||
+      req.path.startsWith("/api/local-updater");
     // Keep unauthenticated traffic bounded by IP, but isolate authenticated agents
     // before controller verification using a non-reversible credential fingerprint.
     const authHeader = req.header("authorization") ?? "";

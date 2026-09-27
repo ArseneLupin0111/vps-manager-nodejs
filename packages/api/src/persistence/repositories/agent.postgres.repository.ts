@@ -17,6 +17,7 @@ type AgentCredentialRow = {
   vps_id: string;
   secret_hash: string;
   status: AgentCredential["status"];
+  scope: string | null;
   created_at: Date | string;
   activated_at: Date | string | null;
   revoked_at: Date | string | null;
@@ -28,6 +29,7 @@ type AgentStateRow = {
   vps_id: string;
   status: AgentState["status"];
   version: string | null;
+  build_id: string | null;
   installed_at: Date | string | null;
   last_seen_at: Date | string | null;
   last_error: string | null;
@@ -63,8 +65,8 @@ export function createPostgresAgentRepository(
         createdAt: new Date().toISOString(),
       };
       const result = await pool.query<AgentCredentialRow>(
-        `INSERT INTO agent_credentials (id, vps_id, secret_hash, status, created_at, activated_at, revoked_at, last_used_at, last_used_ip)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `INSERT INTO agent_credentials (id, vps_id, secret_hash, status, scope, created_at, activated_at, revoked_at, last_used_at, last_used_ip)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          RETURNING *`,
         credentialToValues(credential),
       );
@@ -92,8 +94,8 @@ export function createPostgresAgentRepository(
         const next = { ...current, ...safePatch, id };
         const result = await client.query<AgentCredentialRow>(
           `UPDATE agent_credentials
-           SET vps_id=$2, secret_hash=$3, status=$4, created_at=$5, activated_at=$6,
-               revoked_at=$7, last_used_at=$8, last_used_ip=$9
+           SET vps_id=$2, secret_hash=$3, status=$4, scope=$5, created_at=$6, activated_at=$7,
+               revoked_at=$8, last_used_at=$9, last_used_ip=$10
            WHERE id=$1 RETURNING *`,
           credentialToValues(next),
         );
@@ -121,11 +123,12 @@ export function createPostgresAgentRepository(
     },
     async upsertState(state) {
       const result = await pool.query<AgentStateRow>(
-        `INSERT INTO agent_states (vps_id, status, version, installed_at, last_seen_at, last_error, last_install_job_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `INSERT INTO agent_states (vps_id, status, version, build_id, installed_at, last_seen_at, last_error, last_install_job_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (vps_id) DO UPDATE SET
            status = EXCLUDED.status,
            version = EXCLUDED.version,
+           build_id = EXCLUDED.build_id,
            installed_at = EXCLUDED.installed_at,
            last_seen_at = EXCLUDED.last_seen_at,
            last_error = EXCLUDED.last_error,
@@ -135,6 +138,7 @@ export function createPostgresAgentRepository(
           state.vpsId,
           state.status,
           state.version ?? null,
+          state.buildId ?? null,
           toDateOrNull(state.installedAt),
           toDateOrNull(state.lastSeenAt),
           state.lastError ?? null,
@@ -249,6 +253,7 @@ function credentialToValues(credential: AgentCredential): unknown[] {
     credential.vpsId,
     credential.secretHash,
     credential.status,
+    credential.scope ?? "agent",
     new Date(credential.createdAt),
     toDateOrNull(credential.activatedAt),
     toDateOrNull(credential.revokedAt),
@@ -263,6 +268,7 @@ function rowToCredential(row: AgentCredentialRow): AgentCredential {
     vpsId: row.vps_id,
     secretHash: row.secret_hash,
     status: row.status,
+    scope: (row.scope ?? "agent") as NonNullable<AgentCredential["scope"]>,
     createdAt: requiredIsoString(row.created_at),
     activatedAt: optionalIsoString(row.activated_at),
     revokedAt: optionalIsoString(row.revoked_at),
@@ -294,6 +300,7 @@ function rowToState(row: AgentStateRow): AgentState {
     vpsId: row.vps_id,
     status: row.status,
     version: row.version ?? undefined,
+    buildId: row.build_id ?? undefined,
     installedAt: optionalIsoString(row.installed_at),
     lastSeenAt: optionalIsoString(row.last_seen_at),
     lastError: row.last_error ?? undefined,

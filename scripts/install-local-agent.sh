@@ -408,3 +408,14 @@ echo "  Service:    ${SERVICE_NAME}"
 echo ""
 echo "Check status: sudo systemctl status ${SERVICE_NAME}"
 echo "View logs:    sudo journalctl -u ${SERVICE_NAME} -f"
+echo ""
+# Runbook pointer (plan §5): safe-upgrade updater is a separate, manual
+# bootstrap — installing the agent never installs or upgrades the updater.
+if [[ -x /usr/local/lib/vps-manager-agent/vps-updater ]]; then
+  echo "Updater:  installed (pull-only safe-upgrade daemon)"
+  echo "  Status: sudo /usr/local/lib/vps-manager-agent/vps-updater status -config /etc/vps-updater/config.json"
+else
+  echo "Updater:  not installed — agent upgrades stay manual (plan §4/§5)."
+  echo "  Bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> --sha256 <hex-from-signed-manifest>"
+fi
+echo "Runbook:  docs/local-agent-upgrade-plan.md (offline recovery, rollback hold/ack)"

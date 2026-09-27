@@ -1,10 +1,17 @@
 export type AgentCredentialStatus = "pending" | "active" | "revoked";
 
+/**
+ * Credential scope: "agent" (metrics + command pull, the default when the
+ * column predates scoping) or "local-updater" (upgrade job pull only).
+ */
+export type AgentCredentialScope = "agent" | "local-updater";
+
 export type AgentCredential = {
   id: string;
   vpsId: string;
   secretHash: string;
   status: AgentCredentialStatus;
+  scope?: AgentCredentialScope;
   createdAt: string;
   activatedAt?: string;
   revokedAt?: string;
@@ -16,6 +23,8 @@ export type AgentState = {
   vpsId: string;
   status: "not_installed" | "installing" | "online" | "offline" | "failed";
   version?: string;
+  /** Full git SHA build identity reported by heartbeat ingest. */
+  buildId?: string;
   installedAt?: string;
   lastSeenAt?: string;
   lastError?: string;
@@ -245,6 +254,8 @@ export type AgentMetricPayload = {
   networkTx: number;
   uptime: number;
   agentVersion: string;
+  /** Full git SHA build identity of the running agent binary (heartbeat). */
+  buildId?: string;
   location?: { city: string; country: string; detectedAt: string };
   system?: AgentSystemInfoInput;
   docker?: AgentDockerMetricsInput;

@@ -63,6 +63,11 @@ services:
       TERMINAL_OUTPUT_BUFFER_BYTES: ${TERMINAL_OUTPUT_BUFFER_BYTES:-1048576}
       TERMINAL_INPUT_BUFFER_BYTES: ${TERMINAL_INPUT_BUFFER_BYTES:-65536}
       TERMINAL_SLOW_CONSUMER_TIMEOUT_MS: ${TERMINAL_SLOW_CONSUMER_TIMEOUT_MS:-10000}
+      # Agent release catalog (opt-in). Both key and URL must be set together or
+      # the API fails closed at startup; empty keeps the catalog unavailable.
+      AGENT_RELEASE_PUBLIC_KEY: ${AGENT_RELEASE_PUBLIC_KEY:-}
+      AGENT_RELEASE_MANIFEST_URL: ${AGENT_RELEASE_MANIFEST_URL:-}
+      AGENT_RELEASE_TTL_SECONDS: ${AGENT_RELEASE_TTL_SECONDS:-300}
     depends_on:
       migrate:
         condition: service_completed_successfully

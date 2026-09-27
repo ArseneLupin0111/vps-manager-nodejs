@@ -1,0 +1,625 @@
+package updater
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+)
+
+// jobIDRe is the client-side constraint the API also guarantees
+// (lug_ + nanoid(12) over [A-Za-z0-9_-]). It makes jobId safe as a file name
+// and systemd instance name: no separators, no traversal.
+var jobIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// Helper action file names in stateDir/pending/.
+const (
+	actionApply    = "apply"
+	actionRollback = "rollback"
+	actionCleanup  = "cleanup"
+)
+
+// Helper journal phases (stateDir/helper/journal.json, root-owned).
+const (
+	hjIntent     = "intent"    // backup taken, swap not yet performed
+	hjRenamed    = "renamed"   // new binary in place, restart not yet confirmed
+	hjRestarted  = "restarted" // service restarted with new binary
+	hjRolledBack = "rolled_back"
+)
+
+// HelperJournal records the privileged mutation so a crash between backup,
+// rename and restart is always reconcilable from on-disk facts. Root-owned:
+// the unprivileged updater can read it but never write or delete it.
+type HelperJournal struct {
+	JobID      string    `json:"jobId"`
+	Phase      string    `json:"phase"`
+	OldSha256  string    `json:"oldSha256"`
+	NewSha256  string    `json:"newSha256"`
+	BackupPath string    `json:"backupPath"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// HelperResult is what the helper writes back for the daemon to consume.
+type HelperResult struct {
+	JobID         string    `json:"jobId"`
+	Action        string    `json:"action"`
+	Outcome       string    `json:"outcome"`
+	Detail        string    `json:"detail,omitempty"`
+	BinarySha256  string    `json:"binarySha256,omitempty"`
+	ServiceActive bool      `json:"serviceActive"`
+	At            time.Time `json:"at"`
+}
+
+// Injectable seams so the fault-injection harness can fake process execution
+// and systemd without a real Linux host.
+var (
+	execStagedVersion = defaultExecStagedVersion
+	runSystemctl      = defaultRunSystemctl
+	serviceActiveWait = 10 * time.Second
+	servicePollEvery  = 500 * time.Millisecond
+)
+
+func defaultExecStagedVersion(ctx context.Context, path string) (string, error) {
+	cmd := exec.CommandContext(ctx, path, "-version")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("run %s -version: %w", path, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func defaultRunSystemctl(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "systemctl", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), fmt.Errorf("systemctl %s: %w", strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// Filesystem layout helpers.
+func pendingDir(stateDir string) string { return filepath.Join(stateDir, "pending") }
+func resultsDir(stateDir string) string { return filepath.Join(stateDir, "results") }
+func stagingDir(stateDir, jobID string) string {
+	return filepath.Join(stateDir, "staging", jobID)
+}
+func helperRoot(stateDir string) string { return filepath.Join(stateDir, "helper") }
+func helperJournalPath(stateDir string) string {
+	return filepath.Join(helperRoot(stateDir), "journal.json")
+}
+func backupDir(stateDir, jobID string) string {
+	return filepath.Join(helperRoot(stateDir), "backups", jobID)
+}
+
+func pendingPath(stateDir, action, jobID string) string {
+	return filepath.Join(pendingDir(stateDir), action+"."+jobID)
+}
+func resultPath(stateDir, action, jobID string) string {
+	return filepath.Join(resultsDir(stateDir), jobID+"."+action+".json")
+}
+
+// PendingActions lists pending helper request file names (sorted by ReadDir),
+// for the status command.
+func PendingActions(stateDir string) ([]string, error) {
+	entries, err := os.ReadDir(pendingDir(stateDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
+// LoadHelperJournal reads the root-owned helper journal (nil when absent).
+func LoadHelperJournal(stateDir string) (*HelperJournal, error) {
+	raw, err := os.ReadFile(helperJournalPath(stateDir))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read helper journal: %w", err)
+	}
+	var hj HelperJournal
+	if err := json.Unmarshal(raw, &hj); err != nil {
+		return nil, fmt.Errorf("corrupt helper journal: %w", err)
+	}
+	return &hj, nil
+}
+
+func saveHelperJournal(stateDir string, hj *HelperJournal) error {
+	hj.UpdatedAt = time.Now().UTC()
+	raw, err := json.MarshalIndent(hj, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(helperJournalPath(stateDir), raw, 0o644)
+}
+
+// sha256File streams a file through SHA-256.
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// writeResult persists the helper outcome for the daemon.
+func writeResult(stateDir string, res *HelperResult) error {
+	res.At = time.Now().UTC()
+	raw, err := json.MarshalIndent(res, "", "  ")
+	if err != nil {
+		return err
+	}
+	// Unlink first: a compromised updater-owned dir may hold a stale file.
+	_ = os.Remove(resultPath(stateDir, res.Action, res.JobID))
+	return atomicWriteFile(resultPath(stateDir, res.Action, res.JobID), raw, 0o644)
+}
+
+// ReadResult loads a helper result (nil when not yet produced).
+func ReadResult(stateDir, action, jobID string) (*HelperResult, error) {
+	raw, err := os.ReadFile(resultPath(stateDir, action, jobID))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var res HelperResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("corrupt helper result: %w", err)
+	}
+	return &res, nil
+}
+
+// RunHelper is the root oneshot entrypoint: it drains every pending action
+// file, performs the fixed privileged operations, and writes results. It
+// accepts no argv — the daemon can only ask for actions the helper already
+// knows how to do with root-owned state.
+func RunHelper(ctx context.Context, cfg *Config) error {
+	// The results dir must exist before writeResult; the daemon owns the
+	// state layout but the helper cannot depend on that ordering.
+	if err := os.MkdirAll(resultsDir(cfg.StateDir), 0o770); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(pendingDir(cfg.StateDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var firstErr error
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		action, jobID, ok := parsePendingName(name)
+		if !ok {
+			continue // never act on a name we did not create
+		}
+		var res *HelperResult
+		switch action {
+		case actionApply:
+			res = handleApply(ctx, cfg, jobID)
+		case actionRollback:
+			res = handleRollback(ctx, cfg, jobID)
+		case actionCleanup:
+			res = handleCleanup(ctx, cfg, jobID)
+		default:
+			continue
+		}
+		if err := writeResult(cfg.StateDir, res); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if res.Outcome != "unclear" && res.Outcome != "rollback_failed" &&
+			res.Outcome != "verify_failed" && res.Outcome != "restart_failed_rollback_failed" {
+			// Consumed successfully; unclear outcomes keep the pending file so
+			// the daemon sees the pending request until it halts the job.
+			_ = os.Remove(filepath.Join(pendingDir(cfg.StateDir), name))
+		}
+	}
+	return firstErr
+}
+
+func parsePendingName(name string) (action, jobID string, ok bool) {
+	for _, a := range []string{actionApply, actionRollback, actionCleanup} {
+		prefix := a + "."
+		if strings.HasPrefix(name, prefix) {
+			jobID = strings.TrimPrefix(name, prefix)
+			if jobIDRe.MatchString(jobID) {
+				return a, jobID, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// handleApply performs (or crash-reconciles) one privileged upgrade. Fresh
+// apply re-verifies everything from scratch; a leftover helper journal turns
+// the call into pure reconciliation so a re-triggered path unit can never
+// double-swap.
+func handleApply(ctx context.Context, cfg *Config, jobID string) *HelperResult {
+	res := &HelperResult{JobID: jobID, Action: actionApply}
+
+	hj, err := LoadHelperJournal(cfg.StateDir)
+	if err != nil {
+		res.Outcome, res.Detail = "verify_failed", err.Error()
+		return res
+	}
+	if hj != nil && hj.JobID == jobID {
+		return reconcileApply(ctx, cfg, hj, res)
+	}
+
+	staging := stagingDir(cfg.StateDir, jobID)
+	manifestRaw, err := os.ReadFile(filepath.Join(staging, "manifest.json"))
+	if err != nil {
+		res.Outcome, res.Detail = "verify_failed", "staging manifest missing: "+err.Error()
+		return res
+	}
+	m, err := VerifyManifest(manifestRaw, cfg.PinnedPublicKey)
+	if err != nil {
+		res.Outcome, res.Detail = "verify_failed", err.Error()
+		return res
+	}
+	artifact, err := m.AgentArtifact(cfg.AllowedHosts)
+	if err != nil {
+		res.Outcome, res.Detail = "verify_failed", err.Error()
+		return res
+	}
+
+	// Copy the staged artifact into a root-owned temp file in the TARGET
+	// directory while hashing it: the file that is later verified, executed
+	// and swapped is one file the updater can never mutate after the copy.
+	binDir := filepath.Dir(cfg.AgentBinary)
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		res.Outcome, res.Detail = "verify_failed", err.Error()
+		return res
+	}
+	tmpPath := filepath.Join(binDir, ".vps-new-"+jobID)
+	defer os.Remove(tmpPath)
+
+	newSha, err := copyHashed(filepath.Join(staging, "artifact.bin"), tmpPath, artifact.SHA256, artifact.Size)
+	if err != nil {
+		res.Outcome, res.Detail = "verify_failed", "staged artifact: "+err.Error()
+		return res
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		res.Outcome, res.Detail = "verify_failed", err.Error()
+		return res
+	}
+
+	// Execute the staged binary only AFTER signature + hash checks, and only
+	// to read its self-reported build identity.
+	vctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	line, err := execStagedVersion(vctx, tmpPath)
+	cancel()
+	if err != nil {
+		res.Outcome, res.Detail = "verify_failed", "staged -version: "+err.Error()
+		return res
+	}
+	_, stagedBuild, err := ParseVersionLine(line)
+	if err != nil {
+		res.Outcome, res.Detail = "verify_failed", err.Error()
+		return res
+	}
+	if stagedBuild != m.BuildID {
+		res.Outcome, res.Detail = "verify_failed",
+			fmt.Sprintf("staged buildId %s != manifest %s", stagedBuild, m.BuildID)
+		return res
+	}
+
+	// Already the current binary: nothing to swap (idempotent re-trigger).
+	if curSha, err := sha256File(cfg.AgentBinary); err == nil && curSha == newSha {
+		res.BinarySha256 = curSha
+		active, detail := ensureServiceActive(ctx, cfg)
+		res.ServiceActive = active
+		if active {
+			res.Outcome = "already_current"
+			markHelperJournal(cfg, &HelperJournal{
+				JobID: jobID, Phase: hjRestarted, NewSha256: newSha, OldSha256: newSha,
+			})
+		} else {
+			res.Outcome, res.Detail = "restart_failed_rollback_failed", detail
+		}
+		return res
+	}
+
+	// Backup the current binary (root-owned, unreadable/unwritable by the
+	// updater) before any mutation.
+	bdir := backupDir(cfg.StateDir, jobID)
+	if err := os.MkdirAll(bdir, 0o755); err != nil {
+		res.Outcome, res.Detail = "verify_failed", "backup dir: "+err.Error()
+		return res
+	}
+	backupPath := filepath.Join(bdir, "agent-binary")
+	oldSha := ""
+	if _, statErr := os.Stat(cfg.AgentBinary); statErr == nil {
+		oldSha, err = copyHashed(cfg.AgentBinary, backupPath, "", 0)
+		if err != nil {
+			res.Outcome, res.Detail = "verify_failed", "backup: "+err.Error()
+			return res
+		}
+		_ = os.Chmod(backupPath, 0o755)
+	}
+
+	// Durably record intent BEFORE the swap so a crash is reconcilable.
+	hj = &HelperJournal{
+		JobID: jobID, Phase: hjIntent,
+		OldSha256: oldSha, NewSha256: newSha, BackupPath: backupPath,
+	}
+	if err := saveHelperJournal(cfg.StateDir, hj); err != nil {
+		res.Outcome, res.Detail = "verify_failed", "helper journal: "+err.Error()
+		return res
+	}
+
+	// Atomic swap: same filesystem as the target, fsync'd directory.
+	if err := os.Rename(tmpPath, cfg.AgentBinary); err != nil {
+		res.Outcome, res.Detail = "verify_failed", "swap: "+err.Error()
+		return res
+	}
+	_ = fsyncDir(binDir)
+	hj.Phase = hjRenamed
+	if err := saveHelperJournal(cfg.StateDir, hj); err != nil {
+		// Swapped but not recorded as such — reconcile will detect it by hash.
+		res.Outcome, res.Detail = "unclear", "post-swap journal: "+err.Error()
+		return res
+	}
+	res.BinarySha256 = newSha
+
+	return restartOrRollback(ctx, cfg, hj, res)
+}
+
+// restartOrRollback restarts the agent onto the new binary and rolls back
+// inline when the service fails to come up.
+func restartOrRollback(ctx context.Context, cfg *Config, hj *HelperJournal, res *HelperResult) *HelperResult {
+	if _, err := runSystemctl(ctx, "restart", cfg.AgentUnit); err != nil {
+		res.Detail = "systemctl restart: " + err.Error()
+		return autoRollback(ctx, cfg, hj, res)
+	}
+	hj.Phase = hjRestarted
+	_ = saveHelperJournal(cfg.StateDir, hj)
+
+	active, detail := ensureServiceActive(ctx, cfg)
+	res.ServiceActive = active
+	if active {
+		res.Outcome = "restarted"
+		return res
+	}
+	res.Detail = "service not active after restart: " + detail
+	return autoRollback(ctx, cfg, hj, res)
+}
+
+// autoRollback restores the backup after a failed start. It refuses to run
+// when the backup does not hash to the recorded old value.
+func autoRollback(ctx context.Context, cfg *Config, hj *HelperJournal, res *HelperResult) *HelperResult {
+	if hj.OldSha256 == "" || hj.BackupPath == "" {
+		res.Outcome, res.Detail = "restart_failed_rollback_failed", "no backup to restore"
+		return res
+	}
+	if _, err := restoreBackup(cfg, hj); err != nil {
+		res.Outcome, res.Detail = "restart_failed_rollback_failed", "restore: "+err.Error()
+		return res
+	}
+	hj.Phase = hjRolledBack
+	_ = saveHelperJournal(cfg.StateDir, hj)
+	if _, err := runSystemctl(ctx, "restart", cfg.AgentUnit); err != nil {
+		res.Outcome, res.Detail = "restart_failed_rollback_failed", "restart old: "+err.Error()
+		return res
+	}
+	active, detail := ensureServiceActive(ctx, cfg)
+	res.ServiceActive = active
+	res.BinarySha256 = hj.OldSha256
+	if active {
+		res.Outcome = "auto_rolled_back"
+		return res
+	}
+	res.Outcome, res.Detail = "restart_failed_rollback_failed", "old binary also inactive: "+detail
+	return res
+}
+
+// restoreBackup copies the root-owned backup over the target atomically,
+// verifying the backup still hashes to the recorded old value first.
+func restoreBackup(cfg *Config, hj *HelperJournal) (string, error) {
+	sha, err := sha256File(hj.BackupPath)
+	if err != nil {
+		return "", fmt.Errorf("hash backup: %w", err)
+	}
+	if sha != hj.OldSha256 {
+		return "", fmt.Errorf("backup sha %s != recorded %s", sha, hj.OldSha256)
+	}
+	binDir := filepath.Dir(cfg.AgentBinary)
+	tmpPath := filepath.Join(binDir, ".vps-restore-"+hj.JobID)
+	defer os.Remove(tmpPath)
+	got, err := copyHashed(hj.BackupPath, tmpPath, hj.OldSha256, 0)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmpPath, cfg.AgentBinary); err != nil {
+		return "", err
+	}
+	_ = fsyncDir(binDir)
+	return got, nil
+}
+
+// reconcileApply completes or aborts a previously initiated mutation based on
+// what is actually on disk — it never re-swaps a mutation of unclear outcome.
+func reconcileApply(ctx context.Context, cfg *Config, hj *HelperJournal, res *HelperResult) *HelperResult {
+	actual, err := sha256File(cfg.AgentBinary)
+	if err != nil {
+		res.Outcome, res.Detail = "unclear", "cannot hash current binary: "+err.Error()
+		return res
+	}
+	res.BinarySha256 = actual
+
+	switch {
+	case actual == hj.NewSha256 && hj.OldSha256 == hj.NewSha256:
+		// already_current from an earlier run
+		res.Outcome = "already_current"
+		res.ServiceActive, _ = ensureServiceActive(ctx, cfg)
+		return res
+	case actual == hj.NewSha256:
+		// Swap happened; ensure the restart happened too, then stop.
+		if _, err := runSystemctl(ctx, "restart", cfg.AgentUnit); err == nil {
+			hj.Phase = hjRestarted
+			_ = saveHelperJournal(cfg.StateDir, hj)
+		}
+		res.ServiceActive, res.Detail = ensureServiceActive(ctx, cfg)
+		if res.ServiceActive {
+			res.Outcome = "recovered_restarted"
+		} else {
+			res.Outcome, res.Detail = "unclear", "service inactive after recovery: "+res.Detail
+		}
+		return res
+	case actual == hj.OldSha256 && hj.Phase == hjIntent:
+		// Crash happened before the rename: the swap never occurred.
+		res.Outcome = "recovered_no_swap"
+		res.ServiceActive, _ = ensureServiceActive(ctx, cfg)
+		return res
+	default:
+		res.Outcome, res.Detail = "unclear",
+			fmt.Sprintf("binary sha %s matches neither new %s nor old %s", actual, hj.NewSha256, hj.OldSha256)
+		return res
+	}
+}
+
+// handleRollback restores the pre-upgrade binary for jobID.
+func handleRollback(ctx context.Context, cfg *Config, jobID string) *HelperResult {
+	res := &HelperResult{JobID: jobID, Action: actionRollback}
+	hj, err := LoadHelperJournal(cfg.StateDir)
+	if err != nil || hj == nil || hj.JobID != jobID || hj.BackupPath == "" || hj.OldSha256 == "" {
+		res.Outcome, res.Detail = "rollback_failed", "no helper journal with backup for this job"
+		return res
+	}
+	if hj.Phase == hjRolledBack {
+		res.Outcome, res.Detail = "rolled_back", "already rolled back"
+		res.BinarySha256 = hj.OldSha256
+		res.ServiceActive, _ = ensureServiceActive(ctx, cfg)
+		return res
+	}
+	if _, err := restoreBackup(cfg, hj); err != nil {
+		res.Outcome, res.Detail = "rollback_failed", err.Error()
+		return res
+	}
+	hj.Phase = hjRolledBack
+	_ = saveHelperJournal(cfg.StateDir, hj)
+	if _, err := runSystemctl(ctx, "restart", cfg.AgentUnit); err != nil {
+		res.Outcome, res.Detail = "rollback_failed", "restart: "+err.Error()
+		return res
+	}
+	res.ServiceActive, res.Detail = ensureServiceActive(ctx, cfg)
+	res.BinarySha256 = hj.OldSha256
+	if res.ServiceActive {
+		res.Outcome = "rolled_back"
+	} else {
+		res.Outcome, res.Detail = "rollback_failed", "old binary inactive: "+res.Detail
+	}
+	return res
+}
+
+// handleCleanup deletes the root-owned backup for a job the server has ruled
+// on. The daemon only requests it after observing the terminal ruling.
+func handleCleanup(_ context.Context, cfg *Config, jobID string) *HelperResult {
+	res := &HelperResult{JobID: jobID, Action: actionCleanup}
+	if err := os.RemoveAll(backupDir(cfg.StateDir, jobID)); err != nil {
+		res.Outcome, res.Detail = "cleanup_failed", err.Error()
+		return res
+	}
+	res.Outcome = "cleaned"
+	return res
+}
+
+// ensureServiceActive polls systemctl is-active briefly.
+func ensureServiceActive(ctx context.Context, cfg *Config) (bool, string) {
+	deadline := time.Now().Add(serviceActiveWait)
+	last := ""
+	for {
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		out, err := runSystemctl(cctx, "is-active", cfg.AgentUnit)
+		cancel()
+		if err == nil && out == "active" {
+			return true, "active"
+		}
+		if err != nil {
+			last = err.Error()
+		} else {
+			last = out
+		}
+		if time.Now().After(deadline) {
+			return false, last
+		}
+		select {
+		case <-ctx.Done():
+			return false, last
+		case <-time.After(servicePollEvery):
+		}
+	}
+}
+
+// copyHashed copies src to dst (O_EXCL create, no symlinks followed on the
+// destination) while hashing, enforcing an optional expected sha and size.
+// When wantSHA is empty it just returns the computed hash.
+func copyHashed(src, dst, wantSHA string, wantSize int64) (string, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	if fi, err := in.Stat(); err != nil {
+		return "", err
+	} else if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", src)
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create %s: %w", dst, err)
+	}
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(out, h), in)
+	if err != nil {
+		_ = out.Close()
+		return "", fmt.Errorf("copy: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		return "", err
+	}
+	if wantSize > 0 && n != wantSize {
+		return "", fmt.Errorf("copied %d bytes, want %d", n, wantSize)
+	}
+	got := fmt.Sprintf("%x", h.Sum(nil))
+	if wantSHA != "" && got != wantSHA {
+		return "", fmt.Errorf("sha256 %s != expected %s", got, wantSHA)
+	}
+	return got, nil
+}
+
+func markHelperJournal(cfg *Config, hj *HelperJournal) {
+	_ = saveHelperJournal(cfg.StateDir, hj)
+}

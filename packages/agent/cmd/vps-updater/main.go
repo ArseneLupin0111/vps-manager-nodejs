@@ -1,0 +1,196 @@
+// Command vps-updater is the pull-only local-agent safe-upgrade executable.
+//
+// Subcommands (all unprivileged except helper, which systemd runs as root):
+//
+//	daemon  — claim → download → verify → stage → restart → heartbeat loop
+//	helper  — root oneshot: drain pending actions, perform the fixed swap/
+//	          restart/rollback/cleanup operations, write results. Accepts NO
+//	          positional arguments: the daemon can only ask for actions the
+//	          helper already knows, never pass commands, paths or units.
+//	status  — print the durable journal, helper journal and pending actions
+//	ack     — operator acknowledgement: clear the hold flag so new jobs may
+//	          proceed after rollback_unverified or an unclear mutation
+//	version — print the updater's own build identity and exit
+//
+// The updater binary is static Go (stdlib only) and never shells out to
+// node. scripts/build-agent.mjs builds it for Linux/amd64 alongside the
+// metrics agent; the signed release manifest publishes both artifacts.
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/vps-manager/agent/internal/updater"
+	"github.com/vps-manager/agent/internal/version"
+)
+
+const defaultConfigPath = "/etc/vps-updater/config.json"
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "vps-updater: "+err.Error())
+		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: vps-updater [-config path] <daemon|helper|status|ack|version>")
+	}
+	fs := flag.NewFlagSet("vps-updater", flag.ContinueOnError)
+	configPath := fs.String("config", defaultConfigPath, "path to root-owned updater config")
+	// -version mirrors the agent convention: print identity and exit.
+	showVersion := fs.Bool("version", false, "print updater version and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		if *showVersion {
+			fmt.Println(version.Identity())
+			return nil
+		}
+		return fmt.Errorf("usage: vps-updater [-config path] <daemon|helper|status|ack|version>")
+	}
+	sub := rest[0]
+	// Accept flags after the subcommand too (`vps-updater status -config X`).
+	subArgs := rest[1:]
+	if len(subArgs) > 0 {
+		if err := fs.Parse(subArgs); err != nil {
+			return err
+		}
+		subArgs = fs.Args() // positionals left after flags — forbidden for every subcommand
+	}
+	if *showVersion {
+		fmt.Println(version.Identity())
+		return nil
+	}
+
+	switch sub {
+	case "version":
+		if len(subArgs) > 0 {
+			return fmt.Errorf("version takes no arguments")
+		}
+		fmt.Println(version.Identity())
+		return nil
+	case "helper":
+		// The helper accepts no positional arguments: systemd invokes it
+		// with a fixed argv and it learns the action from the pending dir.
+		if len(subArgs) > 0 {
+			return fmt.Errorf("helper takes no arguments (got %q)", subArgs)
+		}
+		return runHelper(*configPath)
+	case "daemon", "status", "ack":
+		if len(subArgs) > 0 {
+			return fmt.Errorf("%s takes no arguments (got %q)", sub, subArgs)
+		}
+		cfg, err := updater.LoadConfig(*configPath)
+		if err != nil {
+			return err
+		}
+		switch sub {
+		case "daemon":
+			return runDaemon(cfg)
+		case "status":
+			return runStatus(cfg)
+		case "ack":
+			return runAck(cfg)
+		}
+	}
+	return fmt.Errorf("unknown subcommand %q (want daemon|helper|status|ack|version)", sub)
+}
+
+// runDaemon blocks until SIGINT/SIGTERM. Exactly one daemon per state dir
+// (filesystem lock); a second copy exits with the lock error.
+func runDaemon(cfg *updater.Config) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	d := updater.NewDaemon(cfg, updater.NewClient(cfg))
+	if err := d.Run(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+// runHelper is the root oneshot entrypoint: no argv, fixed operations only.
+func runHelper(configPath string) error {
+	cfg, err := updater.LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return updater.RunHelper(ctx, cfg)
+}
+
+// runStatus prints the durable job journal, the root helper journal and any
+// pending actions, for operators and the offline runbook.
+func runStatus(cfg *updater.Config) error {
+	store := updater.NewJournalStore(cfg.StateDir)
+	j, err := store.Load()
+	if err != nil {
+		return fmt.Errorf("journal: %w", err)
+	}
+	if j == nil {
+		fmt.Println("job: none (no journal — idle, no upgrade in flight)")
+	} else {
+		fmt.Println("job:")
+		fmt.Println(updater.MarshalJob(j))
+	}
+	hj, err := updater.LoadHelperJournal(cfg.StateDir)
+	if err != nil {
+		return fmt.Errorf("helper journal: %w", err)
+	}
+	if hj == nil {
+		fmt.Println("helper: no privileged mutation recorded")
+	} else {
+		fmt.Printf("helper: job=%s phase=%s old=%s new=%s backup=%s\n",
+			hj.JobID, hj.Phase, shortHash(hj.OldSha256), shortHash(hj.NewSha256), hj.BackupPath)
+	}
+	pending, err := updater.PendingActions(cfg.StateDir)
+	if err != nil {
+		return fmt.Errorf("pending: %w", err)
+	}
+	if len(pending) == 0 {
+		fmt.Println("pending: none")
+	} else {
+		fmt.Printf("pending: %s\n", pending)
+	}
+	return nil
+}
+
+// runAck clears the hold flag after an operator has inspected a held job
+// (rollback_unverified or unclear mutation). It refuses when there is no
+// held job, so ack can never disturb an in-flight upgrade.
+func runAck(cfg *updater.Config) error {
+	store := updater.NewJournalStore(cfg.StateDir)
+	j, err := store.Load()
+	if err != nil {
+		return fmt.Errorf("journal: %w", err)
+	}
+	if j == nil {
+		return fmt.Errorf("no job journal — nothing to acknowledge")
+	}
+	if !j.Hold {
+		return fmt.Errorf("job %s is not on hold (phase %s) — nothing to acknowledge", j.JobID, j.Phase)
+	}
+	j.Hold = false
+	j.Reason = "operator acknowledged hold; cleared by vps-updater ack"
+	if err := store.Save(j); err != nil {
+		return fmt.Errorf("clear hold: %w", err)
+	}
+	fmt.Printf("job %s hold cleared — daemon may claim new jobs\n", j.JobID)
+	return nil
+}
+
+func shortHash(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}

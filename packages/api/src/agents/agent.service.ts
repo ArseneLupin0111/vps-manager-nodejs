@@ -1,9 +1,15 @@
-import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { ZodError } from "zod";
 import type { AppConfig } from "../config/app-config.js";
 import type {
   AgentCredential,
+  AgentCredentialScope,
   AgentCredentialStatus,
   AgentMetricPayload,
 } from "./agent.models.js";
@@ -109,6 +115,7 @@ export class AgentService {
   async createCredential(
     vpsId: string,
     status?: AgentCredentialStatus,
+    scope?: AgentCredentialScope,
   ): Promise<{ credential: AgentCredential; token: string }> {
     // Verify VPS exists before creating credential
     const vps = await this.vpsRepository.get(vpsId);
@@ -123,6 +130,7 @@ export class AgentService {
       vpsId,
       secretHash,
       status: status ?? "active",
+      ...(scope ? { scope } : {}),
     });
 
     const token = `${TOKEN_PREFIX}${credential.id}_${secret}`;
@@ -189,6 +197,26 @@ export class AgentService {
   }
 
   /**
+   * Bearer verification for agent-facing routes (metrics, commands, docker).
+   * The local-updater credential is scoped to upgrade job pulls only and is
+   * rejected here — scope isolation, not just route placement.
+   */
+  async verifyAgentBearerToken(
+    header: string | undefined,
+  ): Promise<AgentCredential> {
+    const credential = await this.verifyBearerToken(header);
+    if (credential.scope === "local-updater") {
+      throw new ForbiddenException({
+        error: {
+          message: "Credential is not scoped for agent metrics or commands",
+          code: "invalid_credential_scope",
+        },
+      });
+    }
+    return credential;
+  }
+
+  /**
    * Revoke a credential by id.
    */
   async revokeCredential(id: string): Promise<void> {
@@ -229,6 +257,14 @@ export class AgentService {
           error: { message: "Token has been revoked" },
         });
       credential = currentCredential;
+      if (credential.scope === "local-updater") {
+        throw new ForbiddenException({
+          error: {
+            message: "Credential is not scoped for agent metrics or commands",
+            code: "invalid_credential_scope",
+          },
+        });
+      }
       const vps = await this.vpsRepository.get(credential.vpsId);
       if (!vps) {
         throw new VpsNotFoundError();
@@ -289,6 +325,7 @@ export class AgentService {
         vpsId: credential.vpsId,
         status: "online",
         version: parsed.agentVersion,
+        buildId: parsed.buildId,
         installedAt: existingState?.installedAt,
         lastSeenAt: now,
         lastError: undefined,

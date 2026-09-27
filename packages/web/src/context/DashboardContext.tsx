@@ -724,6 +724,15 @@ export function DashboardProvider({
 
   async function handleUpgradeAgent(vps: VpsRecord) {
     const label = vpsDisplayName(vps);
+    if (isLocalHost(vps)) {
+      // Local hosts never go through the SSH upgrade path; the shared
+      // LocalAgentUpdate control owns that flow (release catalog + heartbeat).
+      setStatus({
+        message: `Local upgrades for ${label} use the Update controls on its server card or Settings.`,
+        kind: "default",
+      });
+      return;
+    }
     await runAction(`Starting agent upgrade for ${label}...`, async () => {
       const result = await upgradeAgent(vps.id);
       setOverview((current) => ({
