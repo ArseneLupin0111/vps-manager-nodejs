@@ -214,6 +214,7 @@ async function upsertBuild(vpsId: string, buildId: string, ageMs = 0) {
     buildId,
     lastSeenAt: new Date(Date.now() - ageMs).toISOString(),
   });
+  await agentRepo.upsertSystemInfo({ vpsId, kernel: { arch: "x86_64" } });
 }
 
 async function createQueuedJob(
