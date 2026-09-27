@@ -1,6 +1,9 @@
 import { AlertCircle, CheckCircle2, LoaderCircle, Radio } from "lucide-react";
 import type { DashboardJob, VpsRecord } from "../../../lib/api";
 
+/** Mirrors the API's HOST_FRESHNESS_THRESHOLD_MS for online/offline derivation. */
+const LOCAL_FRESHNESS_MS = 120_000;
+
 const stepLabels: Record<string, string> = {
   queued: "Waiting to start",
   connecting: "Connecting to server",
@@ -32,6 +35,19 @@ export function agentJobFor(vps: VpsRecord, jobs: DashboardJob[]) {
     const bTime = Date.parse(b.finishedAt || b.startedAt || "") || 0;
     return bTime - aTime || b.id.localeCompare(a.id);
   })[0];
+}
+
+/**
+ * Observed local-agent label derived from the record's last-seen heartbeat,
+ * matching the API's freshness window for online/offline: a fresh observation
+ * is "Online", a stale past observation is "Offline", and missing, invalid, or
+ * future timestamps are "Unknown" (never a fresh heartbeat). Shared by card
+ * and table so local labels cannot drift apart.
+ */
+export function localAgentLabel(lastSeenAt: string | undefined, now = Date.now()) {
+  const seen = Date.parse(lastSeenAt || "");
+  if (!Number.isFinite(seen) || seen > now) return "Unknown";
+  return now - seen < LOCAL_FRESHNESS_MS ? "Online" : "Offline";
 }
 
 export function AgentLifecycleStatus({ vps, jobs, compact = false }: {
@@ -69,5 +85,16 @@ export function AgentLifecycleStatus({ vps, jobs, compact = false }: {
   if (status === "online") return <span className="inline-flex items-center gap-1.5 text-xs text-emerald-300" role="status"><CheckCircle2 size={13} aria-hidden="true" />Agent online</span>;
   if (status === "offline") return <span className="inline-flex items-center gap-1.5 text-xs text-amber-300" role="status"><Radio size={13} aria-hidden="true" />Agent offline</span>;
   if (status === "failed") return <span className="inline-flex items-center gap-1.5 text-xs text-red-300" role="alert" title={job?.errorMessage || vps.agentLastError}><AlertCircle size={13} aria-hidden="true" />{job?.errorMessage || vps.agentLastError || "Agent action failed"}</span>;
+  if (vps.kind === "local" || vps.managedBy === "system") {
+    // Local host: the persisted lifecycle row can be missing while the local
+    // process keeps reporting (the supervisor marks the record seen on every
+    // collect), and the shared LocalAgentUpdate control next to this label
+    // shows the observed version/heartbeat. Never assert "not installed" over
+    // that observation — mirror it instead with the shared observed label.
+    const observed = localAgentLabel(vps.lastSeenAt);
+    if (observed === "Online") return <span className="inline-flex items-center gap-1.5 text-xs text-emerald-300" role="status"><CheckCircle2 size={13} aria-hidden="true" />Agent online</span>;
+    if (observed === "Offline") return <span className="inline-flex items-center gap-1.5 text-xs text-amber-300" role="status"><Radio size={13} aria-hidden="true" />Agent offline</span>;
+    return <span className="text-xs text-white/45">Agent status unknown</span>;
+  }
   return <span className="text-xs text-white/45">Agent not installed</span>;
 }

@@ -143,9 +143,12 @@ type payload struct {
 	NetworkTx    float64             `json:"networkTx"`
 	Uptime       float64             `json:"uptime"`
 	AgentVersion string              `json:"agentVersion"`
-	System       *metrics.SystemInfo `json:"system,omitempty"`
-	Location     *metrics.Location   `json:"location,omitempty"`
-	Docker       any                 `json:"docker,omitempty"`
+	// BuildId is the immutable release build identity (40-hex git SHA);
+	// omitted on dev builds with unknown identity so ingest clears it.
+	BuildId   string              `json:"buildId,omitempty"`
+	System    *metrics.SystemInfo `json:"system,omitempty"`
+	Location  *metrics.Location   `json:"location,omitempty"`
+	Docker    any                 `json:"docker,omitempty"`
 }
 
 // selectDockerBranch returns the `docker` wire branch for this push: the
@@ -310,6 +313,7 @@ func (c *Client) Push(ctx context.Context, m *metrics.SystemMetrics) (*PushResul
 		NetworkTx:    m.NetworkTx,
 		Uptime:       m.Uptime,
 		AgentVersion: version.String(),
+		BuildId:      version.BuildID(),
 		System:       m.System,
 		Docker:       c.selectDockerBranch(m),
 		Location:     location,

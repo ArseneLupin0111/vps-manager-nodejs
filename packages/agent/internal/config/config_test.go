@@ -123,6 +123,16 @@ func TestValidate(t *testing.T) {
 			cfg:     Config{BackendUrl: "https://api.example.com", VpsId: "vps_1", Token: "tok", IntervalSeconds: 1, RequestTimeoutSeconds: 1},
 			wantErr: false,
 		},
+		{
+			name:    "http rejected for non-loopback host",
+			cfg:     Config{BackendUrl: "http://api.example.com", VpsId: "vps_1", Token: "tok", IntervalSeconds: 1, RequestTimeoutSeconds: 1},
+			wantErr: true,
+		},
+		{
+			name:    "http accepted for loopback literal",
+			cfg:     Config{BackendUrl: "http://127.0.0.1:3000", VpsId: "vps_1", Token: "tok", IntervalSeconds: 1, RequestTimeoutSeconds: 1},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -139,22 +149,22 @@ func TestValidate(t *testing.T) {
 }
 
 func TestValidate_TrailingSlashNormalized(t *testing.T) {
-	cfg := Config{BackendUrl: "http://example.com/api/", VpsId: "vps_1", Token: "tok", IntervalSeconds: 1, RequestTimeoutSeconds: 1}
+	cfg := Config{BackendUrl: "https://example.com/api/", VpsId: "vps_1", Token: "tok", IntervalSeconds: 1, RequestTimeoutSeconds: 1}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.BackendUrl != "http://example.com/api" {
-		t.Errorf("BackendUrl = %q, want %q", cfg.BackendUrl, "http://example.com/api")
+	if cfg.BackendUrl != "https://example.com/api" {
+		t.Errorf("BackendUrl = %q, want %q", cfg.BackendUrl, "https://example.com/api")
 	}
 }
 
 func TestValidate_TrailingSlashNormalized_Multiple(t *testing.T) {
-	cfg := Config{BackendUrl: "http://example.com///", VpsId: "vps_1", Token: "tok", IntervalSeconds: 1, RequestTimeoutSeconds: 1}
+	cfg := Config{BackendUrl: "https://example.com///", VpsId: "vps_1", Token: "tok", IntervalSeconds: 1, RequestTimeoutSeconds: 1}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.BackendUrl != "http://example.com" {
-		t.Errorf("BackendUrl = %q, want %q", cfg.BackendUrl, "http://example.com")
+	if cfg.BackendUrl != "https://example.com" {
+		t.Errorf("BackendUrl = %q, want %q", cfg.BackendUrl, "https://example.com")
 	}
 }
 

@@ -43,6 +43,8 @@ Deploy uses exactly the image references from the publish outputs. Rollback is r
 
 After publishing, the workflow can deploy over SSH if deployment secrets are configured.
 
+Local systemd agent releases use the separate, reviewer-gated `.github/workflows/release-agent.yml` workflow. It signs an immutable manifest containing agent and updater Linux/amd64 artifacts, then advances the stable pointer. Publishing API/web images does not update the host agent. Configure `AGENT_RELEASE_PUBLIC_KEY` and `AGENT_RELEASE_MANIFEST_URL` together on the API; bootstrap the host updater with the same pinned key and a distinct local-updater credential. The private `AGENT_RELEASE_SIGNING_KEY` belongs only in the protected GitHub `release` environment. See `docs/local-agent-upgrade-operations.md` for staging checks, recovery, rotation, and rollback.
+
 ## Runtime topology
 
 The production deployment runs three containers:
@@ -86,12 +88,22 @@ Optional repository variables can override generated server `.env` values:
 | `RATE_LIMIT_WINDOW_MS`          | `60000`   | Rate limit window.                                                                          |
 | `RATE_LIMIT_MAX`                | `120`     | Rate limit max requests per window.                                                         |
 | `AGENT_PUBLIC_BASE_URL`         | empty     | Public callback URL for installed agents.                                                   |
+| `AGENT_RELEASE_PUBLIC_KEY`      | empty     | Pinned Ed25519 public key (base64 of exactly 32 raw bytes) for the agent release catalog. Must be paired with `AGENT_RELEASE_MANIFEST_URL`; see below. |
+| `AGENT_RELEASE_MANIFEST_URL`    | empty     | Stable-channel pointer URL (`https`, allowlisted host) for the agent release catalog. Must be paired with `AGENT_RELEASE_PUBLIC_KEY`; see below. |
 | `ALLOW_INSECURE_AGENT_HTTP`     | `false`   | Allows HTTP agent callback URLs when explicitly accepted.                                   |
 | `DASHBOARD_SESSION_TTL_SECONDS` | `28800`   | Dashboard session TTL in seconds.                                                           |
 | `DASHBOARD_PUBLIC_ORIGIN`       | empty     | Expected Origin header for CSRF protection.                                                 |
 | `DASHBOARD_COOKIE_SECURE`       | `true`    | Set HttpOnly cookie Secure flag.                                                            |
 | `DASHBOARD_COOKIE_SAME_SITE`    | `lax`     | SameSite cookie attribute.                                                                  |
 | `TRUST_PROXY_HOPS`              | `0`       | Number of reverse proxy hops to trust for client IP. Set to `1` when behind an HTTPS proxy. |
+
+### Configuring the agent release catalog in production
+
+The deploy step writes `AGENT_RELEASE_PUBLIC_KEY` and `AGENT_RELEASE_MANIFEST_URL` into the server `.env` (mode `600`), and the generated compose file passes both to the `api` service explicitly. Configure them as repository **variables** (not secrets) and follow these rules:
+
+- **Set them as a pair.** Both empty keeps the release catalog unavailable; setting only one makes the API refuse to start (fail closed). The public key must be base64 of exactly 32 raw Ed25519 bytes — the value printed by `node scripts/release/sign-manifest.mjs --print-pubkey` or read from the signature step of the published release run. The pointer URL must be `https` on an allowlisted host (see `RELEASE_ALLOWED_HOSTS` in `packages/api/src/release/release-config.ts`).
+- **The public key and pointer URL are public by design.** They identify the trusted signer and the stable channel; they are not credentials, so repository variables are appropriate. Never put the private `AGENT_RELEASE_SIGNING_KEY` in a repository variable, the generated `.env`, or any compose file — it lives only in the protected GitHub `release` environment used by `release-agent.yml`.
+- **To rotate the key**, publish the new public key to `AGENT_RELEASE_PUBLIC_KEY` and redeploy before signing any manifest with the replacement private key; see `docs/local-agent-upgrade-operations.md` for the staged rotation and rollback procedure.
 
 ## Server requirements
 

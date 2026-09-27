@@ -56,7 +56,7 @@ func main() {
 	}
 
 	if *showVersion {
-		fmt.Println(version.String())
+		fmt.Println(version.Identity())
 		return
 	}
 

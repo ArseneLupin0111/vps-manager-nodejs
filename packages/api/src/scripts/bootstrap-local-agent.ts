@@ -15,7 +15,9 @@
  *   --request-timeout-seconds <n> Agent HTTP request timeout (default: 10).
  *   --rotate                      Rotate credential if one already exists (default: keep existing).
  *   --config-only                 Output only the agent config JSON (no envelope).
- *   --allow-insecure-backend-url  Allow http backend URL to non-loopback addresses.
+ *
+ * Backend URL policy: HTTPS always; HTTP only for loopback addresses
+ * (127.0.0.1, ::1, localhost) — there is no override.
  *
  * The script:
  *   1. Loads app config (reads .env via loadAppConfig).
@@ -63,7 +65,6 @@ Options:
   --request-timeout-seconds <n>   Agent HTTP request timeout (default: 10).
   --rotate                        Rotate credential if one already exists.
   --config-only                   Output only the agent config JSON.
-  --allow-insecure-backend-url    Allow http backend URL to non-loopback addresses.
   --help                          Show this help.
 `);
   process.exit(exitCode);
@@ -72,13 +73,10 @@ Options:
 /**
  * Validate a backend URL for agent use.
  * - HTTPS is always allowed.
- * - HTTP is allowed for loopback addresses (127.0.0.1, ::1, localhost) only,
- *   unless --allow-insecure-backend-url is explicitly set.
+ * - HTTP is allowed for loopback addresses (127.0.0.1, ::1, localhost) only.
+ *   There is no override: a non-loopback backend must be HTTPS.
  */
-export function validateBackendUrl(
-  urlString: string,
-  allowInsecure?: boolean,
-): URL {
+export function validateBackendUrl(urlString: string): URL {
   let url: URL;
   try {
     url = new URL(urlString);
@@ -96,9 +94,7 @@ export function validateBackendUrl(
     return url; // HTTPS always ok
   }
 
-  // http: — check loopback
-  if (allowInsecure) return url;
-
+  // http: — loopback only, no override.
   // Normalize hostname: Node.js URL.hostname may return "[::1]" (with brackets) on some versions
   const rawHostname = url.hostname.toLowerCase();
   const hostname = rawHostname.replace(/^\[|\]$/g, "");
@@ -108,7 +104,7 @@ export function validateBackendUrl(
   if (!isLoopback) {
     throw new Error(
       `Insecure backend URL (http) for non-loopback host "${rawHostname}". ` +
-        `Use https or set --allow-insecure-backend-url.`,
+        `Use https, or http with a loopback host (127.0.0.1, ::1, localhost).`,
     );
   }
 
@@ -180,12 +176,11 @@ export async function bootstrapLocalAgent(): Promise<BootstrapOutput> {
   }
   const rotate = hasFlag("--rotate");
   const configOnly = hasFlag("--config-only");
-  const allowInsecure = hasFlag("--allow-insecure-backend-url");
 
   // Validate backend URL
   let backendUrl: URL;
   try {
-    backendUrl = validateBackendUrl(backendUrlRaw, allowInsecure);
+    backendUrl = validateBackendUrl(backendUrlRaw);
   } catch (err: unknown) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);

@@ -270,7 +270,6 @@ export class AgentInstallerService {
           await this.agentRepository.upsertState({
             vpsId,
             status: "online",
-            version: "1.0.0",
             installedAt: new Date().toISOString(),
             lastSeenAt: new Date().toISOString(),
             lastInstallJobId: job!.id,

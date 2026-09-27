@@ -156,6 +156,7 @@ describe("database migrations", () => {
       "018_docker_management.sql",
       "019_docker_legacy_container_identity.sql",
       "020_docker_v2_overview.sql",
+      "021_local_agent_upgrades.sql",
     ]);
     expect(migrations[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS vps");
     expect(migrations[1]?.sql).toContain("metric_samples_vps_effective_idx");
@@ -239,6 +240,7 @@ describe("database migrations", () => {
       "018_docker_management.sql",
       "019_docker_legacy_container_identity.sql",
       "020_docker_v2_overview.sql",
+      "021_local_agent_upgrades.sql",
     ]);
     expect(
       selectMigrations(migrations, true).map((migration) => migration.id),
@@ -263,6 +265,7 @@ describe("database migrations", () => {
       "018_docker_management.sql",
       "019_docker_legacy_container_identity.sql",
       "020_docker_v2_overview.sql",
+      "021_local_agent_upgrades.sql",
     ]);
   });
 });

@@ -45,7 +45,7 @@ export class AgentController {
   ): Promise<AgentIngestResponse> {
     // 1. Authenticate via bearer token
     const authHeader = req.header("authorization");
-    const credential = await this.agentService.verifyBearerToken(authHeader);
+    const credential = await this.agentService.verifyAgentBearerToken(authHeader);
 
     // 2. Ingest the metric payload
     // ZodError from schema validation propagates to the global exception filter
@@ -78,7 +78,7 @@ export class AgentController {
   @Post("commands/claim")
   @HttpCode(200)
   async claimCommand(@Req() req: Request, @Body() body: unknown) {
-    const credential = await this.agentService.verifyBearerToken(
+    const credential = await this.agentService.verifyAgentBearerToken(
       req.header("authorization"),
     );
     const input = agentCommandClaimRequestSchema.parse(body);
@@ -103,7 +103,7 @@ export class AgentController {
   @Post("commands/result")
   @HttpCode(200)
   async reportCommandResult(@Req() req: Request, @Body() body: unknown) {
-    const credential = await this.agentService.verifyBearerToken(
+    const credential = await this.agentService.verifyAgentBearerToken(
       req.header("authorization"),
     );
     const report = agentCommandReportSchema.parse(body);
@@ -114,7 +114,7 @@ export class AgentController {
 
   @Post("docker-management/:vpsId/:operationId/claim")
   async claim(@Param("vpsId") vpsId: string, @Param("operationId") operationId: string, @Req() req: Request, @Body() body: unknown) {
-    const credential = await this.agentService.verifyBearerToken(req.header("authorization"));
+    const credential = await this.agentService.verifyAgentBearerToken(req.header("authorization"));
     if (credential.vpsId !== vpsId) throw new UnauthorizedException();
     const input = dockerManagementClaimSchema.parse(body);
     const agentIdentity = req.header("x-agent-instance");
@@ -126,7 +126,7 @@ export class AgentController {
 
   @Post("docker-management/:vpsId/:operationId/result")
   async result(@Param("vpsId") vpsId: string, @Param("operationId") operationId: string, @Req() req: Request, @Body() body: unknown) {
-    const credential = await this.agentService.verifyBearerToken(req.header("authorization"));
+    const credential = await this.agentService.verifyAgentBearerToken(req.header("authorization"));
     if (credential.vpsId !== vpsId) throw new UnauthorizedException();
     const input = dockerManagementResultSchema.parse(body);
     return { data: this.management.result(vpsId, operationId, req.header("x-agent-instance") ?? "", input) };

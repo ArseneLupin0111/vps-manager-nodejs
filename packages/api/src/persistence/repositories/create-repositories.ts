@@ -47,9 +47,14 @@ import {
 import { createPostgresDockerMonitoringRepository } from "./docker-monitoring.postgres.repository.js";
 import {
   createJsonDockerManagementRepository,
+  createPostgresDockerManagementRepository,
   type DockerManagementRepository,
 } from "./docker-management.repository.js";
-import { createPostgresDockerManagementRepository } from "./docker-management.repository.js";
+import {
+  createJsonLocalUpgradeRepository,
+  type LocalUpgradeRepository,
+} from "./local-upgrade.repository.js";
+import { createPostgresLocalUpgradeRepository } from "./local-upgrade.postgres.repository.js";
 
 export type RepositorySet = {
   vps: VpsRepository;
@@ -62,6 +67,7 @@ export type RepositorySet = {
   hostKeyPins: HostKeyPinRepository;
   dockerMonitoring: DockerMonitoringRepository;
   dockerManagement: DockerManagementRepository;
+  localUpgrades: LocalUpgradeRepository;
   pool?: Pool;
 };
 
@@ -89,6 +95,7 @@ export function createRepositories(
       hostKeyPins: createPostgresHostKeyPinRepository(pool),
       dockerMonitoring: createPostgresDockerMonitoringRepository(pool),
       dockerManagement: createPostgresDockerManagementRepository(pool),
+      localUpgrades: createPostgresLocalUpgradeRepository(pool),
     };
   }
 
@@ -113,6 +120,9 @@ export function createRepositories(
      ),
     dockerManagement: createJsonDockerManagementRepository(
       join(config.dataDir, "docker-management.json"),
+    ),
+    localUpgrades: createJsonLocalUpgradeRepository(
+      join(config.dataDir, "local-upgrades.json"),
     ),
   };
 }

@@ -442,6 +442,151 @@ export function deleteVps(id: string) {
   return request<null>(`${vpsPath(id)}`, { method: "DELETE" });
 }
 
+// ── Local agent updates (local hosts only; remote upgrades stay SSH) ─
+//   GET  /api/vps/:id/agent-update
+//   POST /api/vps/:id/local-agent-upgrades  { releaseId }  (+ Idempotency-Key)
+//   GET  /api/vps/:id/local-agent-upgrades/:jobId
+// The browser never sends a URL, path, command or token; the server pins the
+// signed release and the host updater performs the swap. Local upgrade jobs
+// live in a separate durable store (never in the dashboard jobs feed/SSE), so
+// progress is read back from the persisted job endpoint.
+
+export type AgentUpdateInstalled = {
+  version: string | null;
+  buildId: string | null;
+  lastSeenAt: string | null;
+  fresh: boolean;
+};
+
+export type AgentUpdateArtifact = {
+  os: string;
+  arch: string;
+  size: number;
+  sha256: string;
+  url: string;
+};
+
+export type AgentUpdateAvailable = {
+  releaseId: string;
+  version: string;
+  buildId: string;
+  publishedAt: string;
+  /** Immutable signed manifest URL for the release (manual verification). */
+  manifestUrl: string;
+  /** Base64 raw 32-byte Ed25519 public key pinned for manifest verification. */
+  publicKey: string;
+  artifacts: AgentUpdateArtifact[];
+} | null;
+
+export type AgentUpdateState =
+  | "unknown"
+  | "current"
+  | "available"
+  | "incompatible"
+  | "release_unavailable"
+  | "updater_unavailable";
+
+export type AgentUpdateCompatibility = {
+  compatible: boolean;
+  apiContractVersion: number;
+  reason:
+    | "ok"
+    | "api_incompatible"
+    | "unsupported_architecture"
+    | "release_unavailable"
+    | "unknown";
+};
+
+export type LocalAgentUpgradeState =
+  | "queued"
+  | "claimed"
+  | "downloading"
+  | "verifying"
+  | "staging"
+  | "restarting"
+  | "awaiting_heartbeat"
+  | "rolling_back"
+  | "succeeded"
+  | "rolled_back"
+  | "rollback_unverified"
+  | "failed";
+
+export function isTerminalLocalUpgrade(
+  state: LocalAgentUpgradeState | undefined | null,
+): boolean {
+  return (
+    state === "succeeded" ||
+    state === "rolled_back" ||
+    state === "rollback_unverified" ||
+    state === "failed"
+  );
+}
+
+export type LocalAgentUpgradeJob = {
+  id: string;
+  vpsId: string;
+  state: LocalAgentUpgradeState;
+  /** Real percentage only; null until the phase has determinate progress. */
+  progress: number | null;
+  releaseId: string;
+  releaseVersion: string;
+  releaseBuildId: string;
+  targetSha256?: string;
+  actor?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  completedAt?: string | null;
+  error?: { code: string; message: string } | null;
+  result?: {
+    outcome: string;
+    reportedBuildId?: string;
+    heartbeatBuildId?: string;
+    completedAt?: string;
+  } | null;
+};
+
+export type AgentUpdateStatus = {
+  installed: AgentUpdateInstalled;
+  available: AgentUpdateAvailable;
+  compatibility: AgentUpdateCompatibility;
+  updater: { installed: boolean; healthy: boolean; lastSeenAt: string | null };
+  state: AgentUpdateState;
+  /**
+   * Active job if one is running, otherwise the most recent job, otherwise
+   * null. Lets the UI resume persisted progress and results after a reload.
+   */
+  job: LocalAgentUpgradeJob | null;
+};
+
+export function getVpsAgentUpdate(id: string, signal?: AbortSignal) {
+  return request<AgentUpdateStatus>(`${vpsPath(id)}/agent-update`, { signal });
+}
+
+export function createLocalAgentUpgrade(
+  id: string,
+  payload: { releaseId: string; idempotencyKey: string },
+) {
+  return request<LocalAgentUpgradeJob>(
+    `${vpsPath(id)}/local-agent-upgrades`,
+    {
+      method: "POST",
+      body: JSON.stringify({ releaseId: payload.releaseId }),
+      headers: { "Idempotency-Key": payload.idempotencyKey },
+    },
+  );
+}
+
+export function getLocalAgentUpgrade(
+  id: string,
+  jobId: string,
+  signal?: AbortSignal,
+) {
+  return request<LocalAgentUpgradeJob>(
+    `${vpsPath(id)}/local-agent-upgrades/${encodeURIComponent(jobId)}`,
+    { signal },
+  );
+}
+
 // ── Docker monitoring (bounded, read-only detail data) ──────────────
 
 export type DockerPage<T> = { data: T[]; page: { limit: number; nextCursor?: string; hasMore: boolean } };

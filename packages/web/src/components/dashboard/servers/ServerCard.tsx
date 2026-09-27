@@ -48,6 +48,7 @@ import { formatUptime } from "../shared/formatUptime";
 import { formatBytes } from "./helpers";
 import { DockerMetricsPanel } from "./DockerMetricsPanel";
 import { AgentLifecycleStatus, agentJobFor } from "./AgentLifecycleStatus";
+import { LocalAgentUpdate } from "./LocalAgentUpdate";
 
 // ── ServerCard ───────────────────────────────────────────────────────
 
@@ -288,6 +289,7 @@ export function ServerCard({
           <div className="grid min-w-0 grid-cols-2 gap-x-5 gap-y-1 text-xs xl:order-first xl:grid-cols-1">
             <div className="flex items-center gap-2"><span className="text-white/40">Agent</span><AgentLifecycleStatus vps={vps} jobs={jobs} compact /></div>
             <div className="flex items-center gap-2"><span className="text-white/40">Access</span><span className={isReady ? "text-emerald-300" : "text-amber-300"}>{isLocalHost ? "Local" : isReady ? "Key ready" : "Needs password"}</span></div>
+            {isLocalHost ? <LocalAgentUpdate vps={vps} variant="card" /> : null}
           </div>
         </div>
       </footer>
@@ -709,10 +711,12 @@ function ServerOverflow({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48 rounded-none">
-        <DropdownMenuItem disabled={busy || !canUpgrade} onClick={onRequestUpgrade}>
-          <RotateCw size={15} />
-          Upgrade agent
-        </DropdownMenuItem>
+        {isLocalHost ? null : (
+          <DropdownMenuItem disabled={busy || !canUpgrade} onClick={onRequestUpgrade}>
+            <RotateCw size={15} />
+            Upgrade agent
+          </DropdownMenuItem>
+        )}
         {canRestart ? <DropdownMenuItem disabled={busy} onClick={onRequestRestart}><RotateCw size={15} />Restart agent</DropdownMenuItem> : null}
         {isLocalHost ? <DropdownMenuItem disabled={busy || !canRotateAgent} onClick={onRequestRotateAgent}><KeyRound size={15} />Rotate agent credential</DropdownMenuItem> : null}
         <DropdownMenuItem onClick={onRotate} disabled={busy || isLocalHost}>

@@ -34,21 +34,24 @@ describe("bootstrap-local-agent URL validation", () => {
     );
   });
 
-  it("rejects http for non-loopback without allowInsecure", () => {
+  it("rejects http for non-loopback IP", () => {
     expect(() => validateBackendUrl("http://192.168.1.1:3000")).toThrow(
       /Insecure backend URL/,
     );
   });
 
-  it("rejects http for non-loopback hostname without allowInsecure", () => {
+  it("rejects http for non-loopback hostname", () => {
     expect(() => validateBackendUrl("http://example.com:3000")).toThrow(
       /Insecure backend URL/,
     );
   });
 
-  it("accepts http for non-loopback with allowInsecure flag", () => {
-    const url = validateBackendUrl("http://192.168.1.1:3000", true);
-    expect(url.hostname).toBe("192.168.1.1");
+  it("rejects http for non-loopback even when a second argument is passed", () => {
+    // Regression: the removed allow-insecure override must not come back —
+    // extra positional arguments are silently accepted by JS, so pin it.
+    expect(() =>
+      validateBackendUrl("http://192.168.1.1:3000", true as never),
+    ).toThrow(/Insecure backend URL/);
   });
 
   it("rejects invalid URL strings", () => {

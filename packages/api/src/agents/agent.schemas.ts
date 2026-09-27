@@ -405,6 +405,8 @@ export const agentMetricPayloadSchema = z
         { message: "collectedAt must be within -10m / +2m of now" },
       ),
     agentVersion: z.string().min(1, "agentVersion is required"),
+    /** Full git SHA build identity of the running agent binary (heartbeat). */
+    buildId: z.string().regex(/^[0-9a-f]{40}$/, "buildId must be a full git SHA").optional(),
      vpsId: z.string().optional(),
      location: z.object({
        city: z.string().trim().min(1).max(120),

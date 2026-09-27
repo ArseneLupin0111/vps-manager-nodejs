@@ -13,11 +13,18 @@ FROM deps AS prod-deps
 RUN npm prune --omit=dev
 
 FROM golang:1.25.13-alpine AS agent-builder
+# Immutable build identity, injected by CI (--build-arg AGENT_VERSION=...
+# --build-arg AGENT_BUILD_ID=<full git SHA>); defaults mark unknown identity
+# so a local unparameterized build never advertises a release as current.
+ARG AGENT_VERSION=dev
+ARG AGENT_BUILD_ID
 WORKDIR /src
 COPY packages/agent/go.mod ./
 RUN go mod download
 COPY packages/agent/ .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/vps-agent-linux-amd64 ./cmd/vps-agent
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags "-X github.com/vps-manager/agent/internal/version.Value=${AGENT_VERSION} -X github.com/vps-manager/agent/internal/version.Build=${AGENT_BUILD_ID}" \
+    -o /out/vps-agent-linux-amd64 ./cmd/vps-agent
 
 FROM node:24-alpine AS api-runtime
 ENV NODE_ENV=production \

@@ -137,6 +137,14 @@ jobs:
         if: steps.effective.outputs.api_changed == 'true' || steps.effective.outputs.web_changed == 'true'
         uses: docker/setup-buildx-action@v3
 
+      - name: Resolve agent build identity
+        id: agent-identity
+        # Immutable identity shared by the Docker image build, the standalone
+        # build, and the parity check below (releaseId/buildId = git SHA).
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "build_id=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Build API Docker image
         id: api-build
         if: steps.effective.outputs.api_changed == 'true'
@@ -147,6 +155,9 @@ jobs:
           push: false
           load: true
           tags: vps-manager-nodejs-api:ci
+          build-args: |
+            AGENT_VERSION=${{ steps.agent-identity.outputs.version }}
+            AGENT_BUILD_ID=${{ steps.agent-identity.outputs.build_id }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -174,6 +185,27 @@ jobs:
             test -f /app/db/migrations/016_docker_alert_resolution.sql
             test -x /app/agent/vps-agent-linux-amd64
           '
+
+      - name: Parity check agent identity (image vs standalone)
+        if: steps.changes.outputs.agent == 'true' && steps.effective.outputs.api_changed == 'true'
+        run: |
+          AGENT_VERSION="${{ steps.agent-identity.outputs.version }}" \
+          AGENT_BUILD_ID="${{ steps.agent-identity.outputs.build_id }}" \
+            node scripts/build-agent.mjs
+          IMAGE_ID="$(docker run --rm --entrypoint /app/agent/vps-agent-linux-amd64 vps-manager-nodejs-api:ci -version)"
+          STANDALONE_ID="$(docker run --rm -v "$PWD/packages/agent/dist:/standalone:ro" --entrypoint /standalone/vps-agent-linux-amd64 vps-manager-nodejs-api:ci -version)"
+          echo "image:      $IMAGE_ID"
+          echo "standalone: $STANDALONE_ID"
+          test "$IMAGE_ID" = "$STANDALONE_ID"
+          EXPECTED="${{ steps.agent-identity.outputs.version }}+${{ steps.agent-identity.outputs.build_id }}"
+          test "$IMAGE_ID" = "$EXPECTED"
+          # The bootstrap updater ships in releases with the same identity
+          # (the API image does not carry it); assert it here so a broken
+          # updater build fails before a release can publish it.
+          UPDATER_ID="$(docker run --rm -v "$PWD/packages/agent/dist:/standalone:ro" --entrypoint /standalone/vps-updater-linux-amd64 vps-manager-nodejs-api:ci -version)"
+          echo "standalone updater: $UPDATER_ID"
+          test "$UPDATER_ID" = "$EXPECTED"
+          echo "identity parity OK: $IMAGE_ID"
 
       - name: Build web Docker image
         id: web-build
@@ -405,6 +437,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      - name: Resolve agent build identity
+        id: agent-identity
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "build_id=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Build and push API Docker image
         id: api-build
         uses: docker/build-push-action@v6
@@ -413,6 +451,9 @@ jobs:
           target: api-runtime
           push: true
           tags: ${{ env.API_SHA_TAG }}
+          build-args: |
+            AGENT_VERSION=${{ steps.agent-identity.outputs.version }}
+            AGENT_BUILD_ID=${{ steps.agent-identity.outputs.build_id }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -507,6 +548,8 @@ jobs:
           RATE_LIMIT_MAX_VALUE: ${{ vars.RATE_LIMIT_MAX }}
           AGENT_PUBLIC_BASE_URL_VALUE: ${{ vars.AGENT_PUBLIC_BASE_URL }}
           ALLOW_INSECURE_AGENT_HTTP_VALUE: ${{ vars.ALLOW_INSECURE_AGENT_HTTP }}
+          AGENT_RELEASE_PUBLIC_KEY_VALUE: ${{ vars.AGENT_RELEASE_PUBLIC_KEY }}
+          AGENT_RELEASE_MANIFEST_URL_VALUE: ${{ vars.AGENT_RELEASE_MANIFEST_URL }}
           DASHBOARD_SESSION_TTL_SECONDS_VALUE: ${{ vars.DASHBOARD_SESSION_TTL_SECONDS }}
           DASHBOARD_PUBLIC_ORIGIN_VALUE: ${{ vars.DASHBOARD_PUBLIC_ORIGIN }}
           DASHBOARD_COOKIE_SECURE_VALUE: ${{ vars.DASHBOARD_COOKIE_SECURE }}
@@ -546,6 +589,8 @@ jobs:
           RATE_LIMIT_WINDOW_MS_VALUE="${RATE_LIMIT_WINDOW_MS_VALUE:-60000}"
           RATE_LIMIT_MAX_VALUE="${RATE_LIMIT_MAX_VALUE:-120}"
           ALLOW_INSECURE_AGENT_HTTP_VALUE="${ALLOW_INSECURE_AGENT_HTTP_VALUE:-false}"
+          AGENT_RELEASE_PUBLIC_KEY_VALUE="${AGENT_RELEASE_PUBLIC_KEY_VALUE:-}"
+          AGENT_RELEASE_MANIFEST_URL_VALUE="${AGENT_RELEASE_MANIFEST_URL_VALUE:-}"
           DASHBOARD_SESSION_TTL_SECONDS_VALUE="${DASHBOARD_SESSION_TTL_SECONDS_VALUE:-28800}"
           DASHBOARD_PUBLIC_ORIGIN_VALUE="${DASHBOARD_PUBLIC_ORIGIN_VALUE:-}"
           DASHBOARD_COOKIE_SECURE_VALUE="${DASHBOARD_COOKIE_SECURE_VALUE:-true}"
@@ -621,6 +666,8 @@ jobs:
           RATE_LIMIT_MAX=$RATE_LIMIT_MAX_VALUE
           AGENT_PUBLIC_BASE_URL=$AGENT_PUBLIC_BASE_URL_VALUE
           ALLOW_INSECURE_AGENT_HTTP=$ALLOW_INSECURE_AGENT_HTTP_VALUE
+          AGENT_RELEASE_PUBLIC_KEY=$AGENT_RELEASE_PUBLIC_KEY_VALUE
+          AGENT_RELEASE_MANIFEST_URL=$AGENT_RELEASE_MANIFEST_URL_VALUE
           TRUST_PROXY_HOPS=$TRUST_PROXY_HOPS_VALUE
           TERMINAL_GLOBAL_LIMIT=$TERMINAL_GLOBAL_LIMIT_VALUE
           TERMINAL_DASHBOARD_LIMIT=$TERMINAL_DASHBOARD_LIMIT_VALUE
@@ -665,6 +712,13 @@ jobs:
                   condition: service_healthy
               env_file:
                 - .env
+              environment:
+                # Agent release catalog (opt-in). Key and pointer URL must be a
+                # pair; both empty keeps it disabled, one-only fails the API
+                # closed at startup. Never pass AGENT_RELEASE_SIGNING_KEY here.
+                AGENT_RELEASE_PUBLIC_KEY: \${AGENT_RELEASE_PUBLIC_KEY:-}
+                AGENT_RELEASE_MANIFEST_URL: \${AGENT_RELEASE_MANIFEST_URL:-}
+                AGENT_RELEASE_TTL_SECONDS: \${AGENT_RELEASE_TTL_SECONDS:-300}
               volumes:
                 - vps-manager-data:/app/data
                 - vps-manager-private:/app/private

@@ -20,8 +20,12 @@ import {
 } from "../errors.js";
 import { safeErrorMessage } from "../redaction.js";
 
-function errorBody(message: string, _requestId?: string) {
-  return { error: { message } };
+function errorBody(
+  message: string,
+  _requestId?: string,
+  extra?: Record<string, string>,
+) {
+  return { error: { message, ...extra } };
 }
 
 export class ApiExceptionFilter implements ExceptionFilter {
@@ -105,20 +109,39 @@ export class ApiExceptionFilter implements ExceptionFilter {
       // top-level message string. Array messages (validation detail lists)
       // and other non-string payloads intentionally fall through to the safe
       // generic response.
+      const nestedError =
+        responseBody &&
+        typeof responseBody.error === "object" &&
+        responseBody.error !== null
+          ? (responseBody.error as Record<string, unknown>)
+          : undefined;
       let message: unknown;
       if (responseBody) {
         if (
-          typeof responseBody.error === "object" &&
-          responseBody.error !== null &&
-          typeof (responseBody.error as { message?: unknown }).message ===
-            "string"
+          nestedError &&
+          typeof nestedError.message === "string"
         ) {
-          message = (responseBody.error as { message: string }).message;
+          message = nestedError.message;
         } else if (typeof responseBody.message === "string") {
           message = responseBody.message;
         }
       } else {
         message = error.message;
+      }
+
+      // Whitelist machine-readable contract fields (e.g. error codes, the
+      // conflicting job id, and the incompatibility reason) from nested payloads.
+      const extra: Record<string, string> = {};
+      if (nestedError) {
+        if (typeof nestedError.code === "string") {
+          extra.code = nestedError.code;
+        }
+        if (typeof nestedError.jobId === "string") {
+          extra.jobId = nestedError.jobId;
+        }
+        if (typeof nestedError.reason === "string") {
+          extra.reason = nestedError.reason;
+        }
       }
 
       return response
@@ -129,6 +152,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
               ? safeErrorMessage(message)
               : "Request failed",
             requestId,
+            extra,
           ),
         );
     }

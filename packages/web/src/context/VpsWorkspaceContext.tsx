@@ -42,6 +42,7 @@ import { DockerEventTimeline } from "../components/dashboard/docker/DockerEventT
 import { DockerAlertsPanel } from "../components/dashboard/docker/DockerAlertsPanel";
 import { DockerContainerManagementPanel } from "../components/dashboard/docker/DockerContainerManagementPanel";
 import { DockerStorageOverview } from "../components/dashboard/docker/DockerStorageOverview";
+import { LocalAgentUpdate } from "../components/dashboard/servers/LocalAgentUpdate";
 
 // ── Context type ────────────────────────────────────────────────────
 
@@ -593,6 +594,7 @@ export function VpsWorkspaceSettingsPage() {
         separated.
       </p>
       <SettingsPanel overview={overview} />
+      <LocalAgentUpdate vps={vps} variant="workspace" />
     </div>
   );
 }

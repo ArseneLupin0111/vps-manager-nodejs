@@ -1,0 +1,753 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, Wrench } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../../ui/alert-dialog";
+import { Badge } from "../../ui/badge";
+import { Button } from "../../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../ui/card";
+import {
+  ApiError,
+  createLocalAgentUpgrade,
+  getLocalAgentUpgrade,
+  getVpsAgentUpdate,
+  isTerminalLocalUpgrade,
+  type AgentUpdateCompatibility,
+  type AgentUpdateState,
+  type AgentUpdateStatus,
+  type LocalAgentUpgradeJob,
+  type LocalAgentUpgradeState,
+  type VpsRecord,
+} from "../../../lib/api";
+import { formatDate, freshnessLabel, vpsDisplayName } from "../../../lib/dashboard-formatters";
+import { subscribeMonitoring } from "../../../lib/live-api";
+
+/**
+ * Local-agent upgrade control.
+ *
+ * Single source of truth for the local upgrade action: card footer, table cell
+ * and workspace settings all render this component (no duplicated action
+ * logic). Local upgrade jobs live in a durable store outside the dashboard
+ * jobs feed, so progress is read back from the persisted job endpoint: while
+ * a job is live the existing monitoring SSE stream (subscribeMonitoring)
+ * nudges an immediate debounced re-read, with a ~5s poll as fallback whenever
+ * the stream is quiet or unavailable; agent-update refreshes on mount and
+ * every ~30s. The browser only ever sends { releaseId } — never a URL,
+ * command, path or token. Remote SSH upgrades never touch this control.
+ */
+
+const JOB_POLL_MS = 5_000;
+const STATUS_POLL_MS = 30_000;
+/** Debounce for SSE-triggered job re-reads (mirrors the dashboard's 250ms invalidation debounce). */
+const LIVE_REFRESH_DEBOUNCE_MS = 250;
+
+const PHASE_LABELS: Record<LocalAgentUpgradeState, string> = {
+  queued: "Queued",
+  claimed: "Claimed by updater",
+  downloading: "Downloading release",
+  verifying: "Verifying signature and checksum",
+  staging: "Staging update",
+  restarting: "Restarting agent",
+  awaiting_heartbeat: "Waiting for fresh heartbeat",
+  rolling_back: "Rolling back",
+  succeeded: "Upgrade confirmed",
+  rolled_back: "Rolled back",
+  rollback_unverified: "Rollback unverified",
+  failed: "Upgrade failed",
+};
+
+const STATE_CHIPS: Record<
+  AgentUpdateState,
+  { label: string; variant: "ready" | "pending" | "destructive" | "outline" }
+> = {
+  unknown: { label: "Update status unknown", variant: "outline" },
+  current: { label: "Agent up to date", variant: "ready" },
+  available: { label: "Update available", variant: "pending" },
+  incompatible: { label: "Update blocked", variant: "destructive" },
+  release_unavailable: { label: "Release unavailable", variant: "pending" },
+  updater_unavailable: { label: "Updater not installed", variant: "pending" },
+};
+
+const INCOMPATIBLE_REASONS: Record<AgentUpdateCompatibility["reason"], string> = {
+  ok: "This release is not compatible with this server.",
+  api_incompatible: "The release targets a newer dashboard API contract than this one.",
+  unsupported_architecture: "No release artifact matches this host's operating system and architecture.",
+  release_unavailable: "The release catalog is unavailable — try again shortly.",
+  unknown: "Compatibility could not be determined from the release catalog.",
+};
+
+const JOB_RUNNING_REASON = "An upgrade job is already running for this server.";
+
+/**
+ * Every update state has a concrete disabled reason — there is deliberately no
+ * generic "unavailable" fallback. Reasons for the reachable states (unknown,
+ * incompatible, submitting, job running) are chosen inline below; this map is
+ * the state-specific residual.
+ */
+const STATE_DISABLED_REASONS: Record<AgentUpdateState, string> = {
+  unknown: "Cannot verify the running build: the agent heartbeat is stale or the build ID is missing.",
+  current: "The agent is already up to date.",
+  available: "The updater is not reporting a healthy heartbeat.",
+  incompatible: "This release is not compatible with this server.",
+  release_unavailable: "The release catalog is unavailable — try again shortly.",
+  updater_unavailable: "The updater is not installed on this server.",
+};
+
+function shortBuild(buildId?: string | null): string | null {
+  return buildId ? buildId.slice(0, 12) : null;
+}
+
+function apiErrorCode(error: unknown): { code?: string; jobId?: string } {
+  if (!(error instanceof ApiError)) return {};
+  const payload = error.payload;
+  return {
+    code: typeof payload?.code === "string" ? payload.code : undefined,
+    jobId: typeof payload?.jobId === "string" ? payload.jobId : undefined,
+  };
+}
+
+type ManualInstructions = { intro: string; script: string; notes: string[] };
+
+/** Canonical manual block (HostOwner runbook), values from the release catalog only. */
+function buildManualInstructions(
+  status: AgentUpdateStatus,
+  displayName: string,
+): ManualInstructions | null {
+  const available = status.available;
+  if (!available) return null;
+  const artifact =
+    available.artifacts.find((candidate) => candidate.os === "linux" && candidate.arch === "amd64") ??
+    available.artifacts[0];
+  if (!artifact) return null;
+
+  const binary = `vps-agent-${artifact.os}-${artifact.arch}`;
+  const intro = status.updater.installed
+    ? `The updater is not reporting a healthy heartbeat, so apply the release manually as root on ${displayName} (linux/amd64 only). Values come from the release catalog; verify the release ID matches what the dashboard shows.`
+    : `Updater not installed — upgrade manually as root on ${displayName} (linux/amd64 only). Values below come from the release catalog; verify the release ID matches what the dashboard shows.`;
+
+  const script = [
+    `# 1) Fetch the signed release manifest for release ${available.releaseId}`,
+    `curl -fsSL -o manifest.json "${available.manifestUrl}"`,
+    ``,
+    `# 2) Verify the Ed25519 signature with the pinned public key (fail-closed)`,
+    `export AGENT_RELEASE_PUBLIC_KEY="${available.publicKey}"`,
+    `node scripts/release/verify-manifest.mjs --manifest manifest.json --pubkey-env AGENT_RELEASE_PUBLIC_KEY`,
+    ``,
+    `# 3) Download the ${artifact.os}/${artifact.arch} artifact exactly as listed in the verified manifest`,
+    `curl -fsSL -o ${binary} "${artifact.url}"`,
+    ``,
+    `# 4) Verify the SHA-256 printed in the manifest (release ${available.releaseId})`,
+    `echo "${artifact.sha256}  ${binary}" | sha256sum -c -`,
+    ``,
+    `# 5) Identity check BEFORE install: output must be ${available.version}+${available.buildId}`,
+    `chmod +x ${binary} && ./${binary} -version`,
+    ``,
+    `# 6) Replace binary only — agent config/state/credentials untouched`,
+    `sudo systemctl stop vps-manager-agent.service`,
+    `sudo install -o root -g root -m 0755 ${binary} /usr/local/bin/vps-manager-agent`,
+    `sudo systemctl start vps-manager-agent.service`,
+    ``,
+    `# 7) Confirm within one heartbeat interval: dashboard must show buildId ${available.buildId} as fresh`,
+    `sudo systemctl status vps-manager-agent.service`,
+  ].join("\n");
+
+  const notes = [
+    `sha256sum -c fails if the checksum differs — abort, do not install.`,
+    `If -version has no +<buildId> suffix, the binary is a dev build — abort.`,
+    `Rollback: restore your backup at /usr/local/bin/vps-manager-agent.<previous> with step 6, otherwise re-download the previous release manifest.`,
+    `Manifest URL, public key, artifact URL and checksum come from the API release catalog; verify the release ID matches this dashboard.`,
+  ];
+  return { intro, script, notes };
+}
+
+export type LocalAgentUpdateProps = {
+  vps: VpsRecord;
+  variant: "card" | "table" | "workspace";
+};
+
+export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
+  const isLocal = vps.kind === "local" || vps.managedBy === "system";
+  const displayName = vpsDisplayName(vps);
+
+  const [status, setStatus] = useState<AgentUpdateStatus | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [job, setJob] = useState<LocalAgentUpgradeJob | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const previousJobStateRef = useRef<LocalAgentUpgradeState | null>(null);
+
+  const applyStatus = useCallback((next: AgentUpdateStatus) => {
+    setStatus(next);
+    setLoadError(false);
+    setJob((current) => {
+      if (!next.job) return current;
+      if (!current || current.id !== next.job.id) return next.job;
+      if (!isTerminalLocalUpgrade(current.state)) return current; // live job wins; we poll it directly
+      const currentStamp = Date.parse(current.updatedAt ?? "") || 0;
+      const nextStamp = Date.parse(next.job.updatedAt ?? "") || 0;
+      return nextStamp >= currentStamp ? next.job : current;
+    });
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      applyStatus(await getVpsAgentUpdate(vps.id));
+    } catch {
+      setLoadError(true);
+    }
+  }, [vps.id, applyStatus]);
+
+  // Agent-update: load once on mount, then refresh every 30s (freshness,
+  // catalog pointer, jobs started elsewhere).
+  useEffect(() => {
+    if (!isLocal) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const next = await getVpsAgentUpdate(vps.id, controller.signal);
+        if (!cancelled) applyStatus(next);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [vps.id, isLocal, applyStatus]);
+
+  const jobId = job?.id ?? null;
+  const jobActive = Boolean(job && !isTerminalLocalUpgrade(job.state));
+
+  const refreshJob = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!jobId) return;
+      try {
+        const fresh = await getLocalAgentUpgrade(vps.id, jobId, signal);
+        if (signal?.aborted) return;
+        if (fresh.id === jobId) setJob(fresh);
+      } catch {
+        // Transient failure: the next nudge or poll tick retries; persisted
+        // state on the server is intact.
+      }
+    },
+    [vps.id, jobId],
+  );
+
+  // Persisted job: poll while non-terminal (reload-safe) as the fallback that
+  // works even when the SSE stream is quiet or disconnected.
+  useEffect(() => {
+    if (!isLocal || !jobId || !jobActive) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => void refreshJob(controller.signal), JOB_POLL_MS);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [jobId, jobActive, isLocal, refreshJob]);
+
+  // Timely refresh through the existing SSE mechanism (subscribeMonitoring —
+  // never a second EventSource implementation): while a job is live, stream
+  // activity re-reads the persisted job endpoint immediately (debounced)
+  // instead of waiting for the next poll tick. Only an event scoped to this
+  // host (metrics for this vps) or a full snapshot resync nudges; heartbeat
+  // and jobs.updated belong to the dashboard-wide feed and stay poll-driven.
+  useEffect(() => {
+    if (!isLocal || !jobId || !jobActive) return;
+    if (typeof EventSource === "undefined") return; // environment without SSE: poll-only fallback
+    const controller = new AbortController();
+    let nudgeTimer: number | null = null;
+    const nudge = () => {
+      if (nudgeTimer !== null) return;
+      nudgeTimer = window.setTimeout(() => {
+        nudgeTimer = null;
+        void refreshJob(controller.signal);
+      }, LIVE_REFRESH_DEBOUNCE_MS);
+    };
+    const unsubscribe = subscribeMonitoring({
+      onSnapshot: nudge,
+      onMetricsUpdated: (payload) => {
+        if (payload.metrics.some((metric) => metric.vpsId === vps.id)) nudge();
+      },
+    });
+    return () => {
+      controller.abort();
+      if (nudgeTimer !== null) window.clearTimeout(nudgeTimer);
+      unsubscribe();
+    };
+  }, [isLocal, jobId, jobActive, vps.id, refreshJob]);
+
+  // When a job we watched crosses into a terminal state, refresh the status
+  // once so the installed build/availability reflect the confirmed heartbeat.
+  useEffect(() => {
+    if (!job) {
+      previousJobStateRef.current = null;
+      return;
+    }
+    const previous = previousJobStateRef.current;
+    previousJobStateRef.current = job.state;
+    if (
+      previous &&
+      previous !== job.state &&
+      !isTerminalLocalUpgrade(previous) &&
+      isTerminalLocalUpgrade(job.state)
+    ) {
+      void refreshStatus();
+    }
+  }, [job, refreshStatus]);
+
+  async function confirmUpgrade() {
+    if (!status?.available || submitting) return;
+    const releaseId = status.available.releaseId;
+    setSubmitting(true);
+    setActionError(null);
+    try {
+      const created = await createLocalAgentUpgrade(vps.id, {
+        releaseId,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setJob(created);
+      setConfirmOpen(false);
+    } catch (error) {
+      const { code, jobId: existingJobId } = apiErrorCode(error);
+      if (code === "active_job_exists") {
+        setConfirmOpen(false);
+        if (existingJobId) {
+          try {
+            setJob(await getLocalAgentUpgrade(vps.id, existingJobId));
+          } catch {
+            void refreshStatus();
+          }
+        } else {
+          void refreshStatus();
+        }
+      } else if (code === "release_changed") {
+        void refreshStatus();
+        setActionError(
+          "The stable release changed since this dialog opened. Review the new target and confirm again.",
+        );
+      } else {
+        setActionError(
+          error instanceof Error ? error.message : "The upgrade request failed. Try again.",
+        );
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!isLocal) return null;
+
+  const installed = status?.installed ?? null;
+  const updater = status?.updater ?? null;
+  const available = status?.available ?? null;
+  const activeJob = job && !isTerminalLocalUpgrade(job.state) ? job : null;
+  const resultJob = job && isTerminalLocalUpgrade(job.state) ? job : null;
+  const chip = status ? STATE_CHIPS[status.state] : null;
+  const instructions = status ? buildManualInstructions(status, displayName) : null;
+  const dense = variant !== "workspace";
+
+  const showUpgrade = Boolean(
+    status &&
+      (activeJob ||
+        (available && status.state !== "current" && status.state !== "updater_unavailable")),
+  );
+  const upgradeEnabled = Boolean(
+    showUpgrade && !activeJob && status?.state === "available" && updater?.healthy && !submitting,
+  );
+  const showInstructions = Boolean(
+    !activeJob &&
+      available &&
+      instructions &&
+      (!updater?.installed || !updater?.healthy || status?.state === "updater_unavailable"),
+  );
+
+  // Every disabled state carries a concrete reason; no generic fallback.
+  let upgradeReason: string | null = null;
+  if (showUpgrade && !upgradeEnabled) {
+    if (activeJob) {
+      upgradeReason = JOB_RUNNING_REASON;
+    } else if (status?.state === "incompatible") {
+      upgradeReason = INCOMPATIBLE_REASONS[status.compatibility.reason];
+    } else if (submitting) {
+      upgradeReason = "Starting the upgrade…";
+    } else if (status) {
+      upgradeReason = STATE_DISABLED_REASONS[status.state];
+    }
+  }
+
+  const installedText = installed
+    ? installed.buildId
+      ? `Agent ${installed.version ?? "unknown"} (${shortBuild(installed.buildId)})`
+      : `Agent ${installed.version ?? "unknown"}`
+    : null;
+  const heartbeatText = installed
+    ? installed.fresh
+      ? `heartbeat ${freshnessLabel(installed.lastSeenAt ?? undefined)}`
+      : `heartbeat stale (${freshnessLabel(installed.lastSeenAt ?? undefined)})`
+    : null;
+
+  let liveContent: React.ReactNode = null;
+  if (activeJob) {
+    const determinate = typeof activeJob.progress === "number";
+    const percent = determinate
+      ? Math.min(100, Math.max(0, Math.round(activeJob.progress as number)))
+      : null;
+    liveContent = (
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-sky-200">
+        <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />
+        <span>{PHASE_LABELS[activeJob.state]}</span>
+        <span className="text-white/45">
+          target {activeJob.releaseVersion} ({shortBuild(activeJob.releaseBuildId)})
+        </span>
+        {percent !== null ? (
+          <span className="tabular-nums text-white/70">{percent}%</span>
+        ) : null}
+        {percent !== null ? (
+          <div
+            role="progressbar"
+            aria-label={`Agent upgrade progress for ${displayName}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+            className="h-1.5 w-full max-w-56 overflow-hidden bg-white/10"
+          >
+            <div
+              className="h-full bg-sky-400 transition-[width] duration-300"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  } else if (resultJob) {
+    const completedAt = resultJob.completedAt ?? undefined;
+    const finishedAt = completedAt ? `completed ${freshnessLabel(completedAt)}` : "";
+    if (resultJob.state === "succeeded") {
+      const confirmedBuild =
+        resultJob.result?.heartbeatBuildId ??
+        resultJob.result?.reportedBuildId ??
+        resultJob.releaseBuildId;
+      liveContent = (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-300">
+          <CheckCircle2 size={13} aria-hidden="true" />
+          <span>
+            Upgrade confirmed — {resultJob.releaseVersion} ({shortBuild(confirmedBuild)}) is sending a fresh heartbeat.
+          </span>
+          {finishedAt ? (
+            <span className="text-white/45" title={formatDate(completedAt)}>
+              {finishedAt}
+            </span>
+          ) : null}
+        </div>
+      );
+    } else if (resultJob.state === "rolled_back") {
+      liveContent = (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-amber-300">
+          <AlertTriangle size={13} aria-hidden="true" />
+          <span>
+            Upgrade failed and rolled back — the previous build was verified by heartbeat.
+            {resultJob.error ? ` ${resultJob.error.message}` : ""}
+          </span>
+          {finishedAt ? (
+            <span className="text-white/45" title={formatDate(completedAt)}>
+              {finishedAt}
+            </span>
+          ) : null}
+        </div>
+      );
+    } else if (resultJob.state === "rollback_unverified") {
+      liveContent = (
+        <div className="space-y-1 text-xs text-red-300">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <AlertTriangle size={13} aria-hidden="true" />
+            <span>
+              Upgrade failed and the rollback is unverified — manual intervention required.
+            </span>
+            {finishedAt ? (
+              <span className="text-white/45" title={formatDate(completedAt)}>
+                {finishedAt}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-white/55">
+            No fresh heartbeat arrived after the swap deadline. On the host, run
+            <span className="font-mono"> systemctl status vps-manager-agent</span> and
+            <span className="font-mono"> journalctl -u vps-manager-agent</span>, confirm which build is
+            running, and restore the previous binary from your backup before treating this server as upgraded.
+          </p>
+        </div>
+      );
+    } else {
+      liveContent = (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-red-300">
+          <AlertTriangle size={13} aria-hidden="true" />
+          <span>
+            Upgrade failed before the agent was swapped.
+            {resultJob.error ? ` ${resultJob.error.message}` : ""}
+          </span>
+          {finishedAt ? (
+            <span className="text-white/45" title={formatDate(completedAt)}>
+              {finishedAt}
+            </span>
+          ) : null}
+        </div>
+      );
+    }
+  }
+
+  const actions = (
+    <>
+      {showUpgrade ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="default"
+          className={dense ? "text-[11px]" : undefined}
+          disabled={!upgradeEnabled}
+          onClick={() => {
+            setActionError(null);
+            setConfirmOpen(true);
+          }}
+        >
+          Upgrade agent
+        </Button>
+      ) : null}
+      {showInstructions ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className={dense ? "text-[11px]" : undefined}
+          onClick={() => setInstructionsOpen(true)}
+        >
+          <Wrench size={13} />
+          View update instructions
+        </Button>
+      ) : null}
+    </>
+  );
+
+  const retryRow = loadError ? (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/45">
+      <span>Update status unavailable.</span>
+      <Button type="button" size="sm" variant="outline" className="text-[11px]" onClick={() => void refreshStatus()}>
+        <RefreshCw size={12} />
+        Retry
+      </Button>
+    </div>
+  ) : null;
+
+  const details = status ? (
+    <>
+      <div className={dense ? "flex flex-wrap items-center gap-x-2 gap-y-1" : "flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"}>
+        {dense && variant === "card" ? <span className="text-white/40">Update</span> : null}
+        {installedText ? <span className="text-white/70">{installedText}</span> : null}
+        {heartbeatText ? (
+          <span className={`text-[11px] ${installed?.fresh ? "text-white/40" : "text-amber-300/80"}`} title={formatDate(installed?.lastSeenAt ?? undefined)}>
+            {heartbeatText}
+          </span>
+        ) : null}
+        {chip ? (
+          <Badge variant={chip.variant} className="text-[10px] uppercase tracking-wide">
+            {chip.label}
+          </Badge>
+        ) : null}
+      </div>
+      {!dense ? (
+        <div className="mt-2 space-y-1 text-xs">
+          <DetailRow label="Installed build" value={installed?.buildId ?? "Not reported"} mono />
+          <DetailRow label="Last heartbeat" value={installed ? formatDate(installed.lastSeenAt ?? undefined) : "Not reported"} />
+          <DetailRow
+            label="Updater"
+            value={
+              updater?.installed
+                ? `Installed · ${updater.healthy ? "healthy" : "unhealthy"} · last seen ${freshnessLabel(updater.lastSeenAt ?? undefined)}`
+                : "Not installed on this host"
+            }
+          />
+          {available ? (
+            <>
+              <DetailRow label="Release" value={`${available.version} (${shortBuild(available.buildId)})`} />
+              <DetailRow label="Release ID" value={available.releaseId} mono />
+              <DetailRow label="Published" value={formatDate(available.publishedAt)} />
+            </>
+          ) : (
+            <DetailRow label="Release" value={status.state === "release_unavailable" ? "Catalog unavailable" : "No newer release"} />
+          )}
+          {status.compatibility.reason !== "ok" ? (
+            <DetailRow label="Compatibility" value={INCOMPATIBLE_REASONS[status.compatibility.reason]} />
+          ) : null}
+        </div>
+      ) : null}
+      {liveContent ? (
+        <div role="status" aria-live="polite" className={dense ? "mt-1" : "mt-2"}>
+          {liveContent}
+        </div>
+      ) : null}
+      <div className={dense ? "mt-1 flex flex-wrap items-center gap-2" : "mt-2 flex flex-wrap items-center gap-2"}>
+        {actions}
+      </div>
+      {upgradeReason ? <p className="mt-1 text-[11px] text-white/45">{upgradeReason}</p> : null}
+      {actionError ? (
+        <p role="alert" className="mt-1 text-[11px] text-red-300">
+          {actionError}
+        </p>
+      ) : null}
+      {retryRow ? <div className="mt-1">{retryRow}</div> : null}
+    </>
+  ) : (
+    retryRow
+  );
+
+  if (variant === "workspace") {
+    if (!status && !loadError) return null;
+    return (
+      <>
+        <Card>
+          <CardHeader>
+            <CardTitle>Agent updates</CardTitle>
+            <CardDescription>
+              Upgrade {displayName} from the signed release catalog. Progress is confirmed by a fresh agent
+              heartbeat, not by the service status.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">{details}</CardContent>
+        </Card>
+        {renderDialogs()}
+      </>
+    );
+  }
+
+  if (!status && !loadError) return null;
+  return (
+    <>
+      <div className={variant === "card" ? "col-span-2 min-w-0 xl:col-span-1" : "min-w-0"}>
+        {details}
+      </div>
+      {renderDialogs()}
+    </>
+  );
+
+  function renderDialogs() {
+    return (
+      <>
+        <AlertDialog
+          open={confirmOpen}
+          onOpenChange={(open) => {
+            if (!open) setConfirmOpen(false);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Upgrade agent on {displayName}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Monitoring pauses for one agent restart. The upgrade counts as complete only when the new
+                build sends a fresh heartbeat from this server.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-2 text-xs text-white/70">
+              <div className="flex justify-between gap-4">
+                <span className="text-white/40">Current</span>
+                <span className="text-right">
+                  {installedText ?? "Unknown"}
+                  {heartbeatText ? ` · ${heartbeatText}` : ""}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-white/40">Target</span>
+                <span className="text-right">
+                  {available ? `${available.version} (${shortBuild(available.buildId)})` : ""}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-white/40">Release ID</span>
+                <span className="break-all text-right font-mono">{available?.releaseId ?? ""}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-white/40">Downtime</span>
+                <span className="text-right">
+                  Monitoring pauses for a few seconds while the agent restarts.
+                </span>
+              </div>
+              <p className="text-white/50">
+                If the upgrade cannot complete, the updater restores the previous binary and verifies its
+                heartbeat; an unverified rollback is flagged for manual intervention. Existing credentials
+                are preserved.
+              </p>
+              {actionError ? (
+                <p role="alert" className="text-red-300">
+                  {actionError}
+                </p>
+              ) : null}
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={submitting}
+                onClick={(event) => {
+                  event.preventDefault();
+                  void confirmUpgrade();
+                }}
+              >
+                {submitting ? "Starting…" : "Upgrade agent"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <AlertDialog
+          open={instructionsOpen}
+          onOpenChange={(open) => {
+            if (!open) setInstructionsOpen(false);
+          }}
+        >
+          <AlertDialogContent className="max-w-2xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Update the agent manually</AlertDialogTitle>
+              <AlertDialogDescription>{instructions?.intro ?? ""}</AlertDialogDescription>
+            </AlertDialogHeader>
+            {instructions ? (
+              <>
+                <pre className="max-h-64 overflow-auto border border-white/10 bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
+                  {instructions.script}
+                </pre>
+                <ul className="list-disc space-y-1 pl-4 text-[11px] text-white/50">
+                  {instructions.notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="text-xs text-white/60">No published release is available to install.</p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel>Close</AlertDialogCancel>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
+    );
+  }
+}
+
+function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-white/40">{label}</span>
+      <span className={`break-all text-right text-white/70 ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}

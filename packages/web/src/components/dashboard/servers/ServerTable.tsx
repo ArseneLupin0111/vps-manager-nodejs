@@ -20,7 +20,8 @@ import {
 } from "../../../lib/dashboard-formatters";
 import type { VpsRecord } from "../../../lib/api";
 import type { DashboardJob } from "../../../lib/api";
-import { AgentLifecycleStatus, agentJobFor } from "./AgentLifecycleStatus";
+import { AgentLifecycleStatus, agentJobFor, localAgentLabel } from "./AgentLifecycleStatus";
+import { LocalAgentUpdate } from "./LocalAgentUpdate";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -107,6 +108,21 @@ export function ServerTable({
               const canRestart = mode !== "demo" && !isLocal && Boolean(vps.keyProvisionedAt) && !agentActionRunning && (vps.agentStatus === "offline" || vps.agentStatus === "failed");
               const canRotateAgent = mode !== "demo" && isLocal && !agentActionRunning;
               const accessProblem = !isLocal && (!vps.keyProvisionedAt || vps.status === "unreachable");
+              // Local rows mirror the card lifecycle: when the persisted
+              // lifecycle row is missing/stale, derive online/offline from the
+              // observed local heartbeat instead of the "Unknown" placeholder.
+              // Remote rows keep their existing labels untouched.
+              const agentLabel =
+                vps.agentStatus === "online" ? "Online"
+                : vps.agentStatus === "offline" ? "Offline"
+                : vps.agentStatus === "failed" ? "Failed"
+                : !isLocal ? "Not installed"
+                : localAgentLabel(vps.lastSeenAt);
+              const agentTone =
+                agentLabel === "Online" ? "green"
+                : agentLabel === "Failed" ? "red"
+                : agentLabel === "Offline" ? "amber"
+                : "neutral";
               return (
                 <tr
                   key={vps.id}
@@ -135,7 +151,8 @@ export function ServerTable({
                     <TableStatus kind="host" label={serverStatusLabel(vps.status)} tone={vps.status === "healthy" ? "green" : vps.status === "warning" ? "amber" : vps.status === "unreachable" ? "red" : "neutral"} />
                   </td>
                   <td className="px-3 py-3">
-                    {agentActionRunning ? <AgentLifecycleStatus vps={vps} jobs={serverJobs} compact /> : <TableStatus kind="agent" label={isLocal ? "Local" : vps.agentStatus === "online" ? "Online" : vps.agentStatus === "offline" ? "Offline" : vps.agentStatus === "failed" ? "Failed" : "Not installed"} tone={isLocal || vps.agentStatus === "online" ? "green" : vps.agentStatus === "failed" ? "red" : vps.agentStatus === "offline" ? "amber" : "neutral"} />}
+                    {agentActionRunning ? <AgentLifecycleStatus vps={vps} jobs={serverJobs} compact /> : <TableStatus kind="agent" label={agentLabel} tone={agentTone} />}
+                    {isLocal ? <div className="mt-1"><LocalAgentUpdate vps={vps} variant="table" /></div> : null}
                   </td>
                   <td className="px-3 py-3">
                     <Badge variant={isReady ? "ready" : "pending"}>
@@ -178,7 +195,7 @@ export function ServerTable({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48 rounded-none">
                           {!accessProblem ? <DropdownMenuItem disabled={busy || isLocal} onClick={() => onVerify(vps)}><ShieldCheck size={14} /> Verify access</DropdownMenuItem> : null}
-                          <DropdownMenuItem disabled={busy || !canUpgrade} onClick={() => window.setTimeout(() => setUpgradeTarget(vps), 0)}><RotateCw size={14} /> Upgrade agent</DropdownMenuItem>
+                          {isLocal ? null : <DropdownMenuItem disabled={busy || !canUpgrade} onClick={() => window.setTimeout(() => setUpgradeTarget(vps), 0)}><RotateCw size={14} /> Upgrade agent</DropdownMenuItem>}
                           {canRestart ? <DropdownMenuItem disabled={busy} onClick={() => window.setTimeout(() => setRestartTarget(vps), 0)}><RotateCw size={14} /> Restart agent</DropdownMenuItem> : null}
                           {isLocal ? <DropdownMenuItem disabled={busy || !canRotateAgent} onClick={() => window.setTimeout(() => setRotateAgentTarget(vps), 0)}><KeyRound size={14} /> Rotate agent credential</DropdownMenuItem> : null}
                           <DropdownMenuItem disabled={busy || isLocal || !provisionPasswords[vps.id]?.trim()} onClick={() => onProvision(vps)}><KeyRound size={14} /> Reinstall SSH key</DropdownMenuItem>
