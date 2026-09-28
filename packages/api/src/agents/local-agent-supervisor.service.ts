@@ -180,14 +180,18 @@ export class LocalAgentSupervisorService
       // Append metric sample
       await this.metricRepository.append(sample, this.config.metricWindowLimit);
 
-      // Update agent state
+      // The in-process collector is a fallback for hosts without a real agent.
+      // Never replace the signed agent's heartbeat/build identity with synthetic state.
       const now = new Date().toISOString();
-      await this.agentRepository.upsertState({
-        vpsId: this.localHostId,
-        status: "online",
-        version: "0.1.0-local",
-        lastSeenAt: now,
-      });
+      const currentState = await this.agentRepository.getState(this.localHostId);
+      if (!currentState || currentState.version === "0.1.0-local") {
+        await this.agentRepository.upsertState({
+          vpsId: this.localHostId,
+          status: "online",
+          version: "0.1.0-local",
+          lastSeenAt: now,
+        });
+      }
 
       // Update VPS record lastSeenAt/status
       await this.vpsRepository.markSeen(this.localHostId, "healthy", now);
@@ -205,13 +209,16 @@ export class LocalAgentSupervisorService
    */
   private async markAgentOffline(): Promise<void> {
     try {
-      const now = new Date().toISOString();
-      await this.agentRepository.upsertState({
-        vpsId: this.localHostId,
-        status: "offline",
-        version: "0.1.0-local",
-        lastSeenAt: now,
-      });
+      const currentState = await this.agentRepository.getState(this.localHostId);
+      if (!currentState || currentState.version === "0.1.0-local") {
+        const now = new Date().toISOString();
+        await this.agentRepository.upsertState({
+          vpsId: this.localHostId,
+          status: "offline",
+          version: "0.1.0-local",
+          lastSeenAt: now,
+        });
+      }
     } catch {
       // Best effort on shutdown
     }
