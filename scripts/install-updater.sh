@@ -375,6 +375,10 @@ fi
 # Binary (directory not writable by the updater user: it cannot replace
 # itself; only the fixed helper may touch /usr/local/bin/vps-manager-agent).
 run mkdir -p "$(dirname "$BINARY_DEST")"
+# Existing agent installations may keep this root-owned directory at 0700.
+# The unprivileged updater needs traversal, not write access.
+run chown root:root "$(dirname "$BINARY_DEST")"
+run chmod 0755 "$(dirname "$BINARY_DEST")"
 run cp -f "$BINARY_SRC" "$BINARY_DEST"
 run chown root:root "$BINARY_DEST"
 run chmod 0755 "$BINARY_DEST"
