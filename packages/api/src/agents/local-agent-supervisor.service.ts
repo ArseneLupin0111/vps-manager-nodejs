@@ -180,20 +180,16 @@ export class LocalAgentSupervisorService
       // Append metric sample
       await this.metricRepository.append(sample, this.config.metricWindowLimit);
 
-      // The in-process collector is a fallback for hosts without a real agent.
-      // Never replace the signed agent's heartbeat/build identity with synthetic state.
+      // The in-process collector supplies metrics but never replaces a real
+      // agent's signed heartbeat/build identity. The repository guard is atomic
+      // with the write so concurrent agent ingest cannot lose its identity.
       const now = new Date().toISOString();
-      const currentState = await this.agentRepository.getState(this.localHostId);
-      if (!currentState || currentState.version === "0.1.0-local") {
-        await this.agentRepository.upsertState({
-          vpsId: this.localHostId,
-          status: "online",
-          version: "0.1.0-local",
-          lastSeenAt: now,
-        });
-      }
-
-      // Update VPS record lastSeenAt/status
+      await this.agentRepository.upsertSyntheticLocalState({
+        vpsId: this.localHostId,
+        status: "online",
+        version: "0.1.0-local",
+        lastSeenAt: now,
+      });
       await this.vpsRepository.markSeen(this.localHostId, "healthy", now);
     } catch (error: unknown) {
       // Log but don't crash the service
@@ -209,16 +205,12 @@ export class LocalAgentSupervisorService
    */
   private async markAgentOffline(): Promise<void> {
     try {
-      const currentState = await this.agentRepository.getState(this.localHostId);
-      if (!currentState || currentState.version === "0.1.0-local") {
-        const now = new Date().toISOString();
-        await this.agentRepository.upsertState({
-          vpsId: this.localHostId,
-          status: "offline",
-          version: "0.1.0-local",
-          lastSeenAt: now,
-        });
-      }
+      await this.agentRepository.upsertSyntheticLocalState({
+        vpsId: this.localHostId,
+        status: "offline",
+        version: "0.1.0-local",
+        lastSeenAt: new Date().toISOString(),
+      });
     } catch {
       // Best effort on shutdown
     }
