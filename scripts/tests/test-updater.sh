@@ -187,12 +187,13 @@ else
   fail "uninstall must preserve ${STATE_DIR} unless --purge-state"
 fi
 
-# Operations footer uses the full installed path (binary is not on PATH)
+# Operations footer uses the full installed path (binary is not on PATH), and
+# ack runs as the unprivileged service user so the journal stays daemon-owned
 if grep -Fq 'sudo ${BINARY_DEST} status -config ${CONFIG_FILE}' "$INSTALL_UPDATER" \
-  && grep -Fq 'sudo ${BINARY_DEST} ack -config ${CONFIG_FILE}' "$INSTALL_UPDATER"; then
-  pass "operations footer prints full installed binary path (status/ack)"
+  && grep -Fq 'sudo -u ${SERVICE_USER} ${BINARY_DEST} ack -config ${CONFIG_FILE}' "$INSTALL_UPDATER"; then
+  pass "operations footer prints full binary path (status) and acks as the service user"
 else
-  fail "operations commands must use the full ${BINARY_DEST} path"
+  fail "status must use the full ${BINARY_DEST} path; ack must run as the ${SERVICE_USER} service user"
 fi
 
 # Go invariants: production invariants live in LoadConfig, test-only escape

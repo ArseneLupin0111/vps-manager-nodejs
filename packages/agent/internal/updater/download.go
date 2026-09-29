@@ -93,6 +93,11 @@ func DownloadArtifact(ctx context.Context, cfg *Config, client *http.Client, art
 	if got != artifact.SHA256 {
 		return nil, fmt.Errorf("download sha256 %s does not match signed %s", got, artifact.SHA256)
 	}
+	// The helper runs without DAC override capabilities. Set permissions on
+	// the temporary file before publishing it as the verified artifact.
+	if err := os.Chmod(partPath, 0o755); err != nil {
+		return nil, fmt.Errorf("make staged artifact readable: %w", err)
+	}
 	if err := os.Rename(partPath, destPath); err != nil {
 		return nil, fmt.Errorf("finalize download: %w", err)
 	}

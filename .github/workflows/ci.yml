@@ -109,6 +109,9 @@ jobs:
 
       - name: Validate installer hardening
         run: bash scripts/tests/test-installer-docker-access.sh
+      - name: Validate updater bootstrap and unit hardening
+        run: bash scripts/tests/test-updater.sh
+
 
       - name: Validate Docker Compose configuration
         env:

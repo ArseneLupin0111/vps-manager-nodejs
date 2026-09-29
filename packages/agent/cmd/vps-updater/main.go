@@ -179,6 +179,11 @@ func runAck(cfg *updater.Config) error {
 	if !j.Hold {
 		return fmt.Errorf("job %s is not on hold (phase %s) — nothing to acknowledge", j.JobID, j.Phase)
 	}
+	// The journal is private to the updater service. Running ack as root
+	// replaces it with a root-owned file and prevents the daemon from resuming.
+	if os.Geteuid() == 0 {
+		return fmt.Errorf("run ack as the vps-updater service user, not root")
+	}
 	j.Hold = false
 	j.Reason = "operator acknowledged hold; cleared by vps-updater ack"
 	if err := store.Save(j); err != nil {

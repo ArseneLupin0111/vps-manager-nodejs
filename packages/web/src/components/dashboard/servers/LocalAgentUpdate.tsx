@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, Wrench } from "lucide-react";
 import {
   AlertDialog,
@@ -184,6 +184,9 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const previousJobStateRef = useRef<LocalAgentUpgradeState | null>(null);
+  /** Shared id so the disabled Upgrade button can reference its reason (aria-describedby). */
+  const reasonId = useId();
+  const upgradeTriggerRef = useRef<HTMLButtonElement>(null);
 
   const applyStatus = useCallback((next: AgentUpdateStatus) => {
     setStatus(next);
@@ -362,6 +365,7 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
 
   const showUpgrade = Boolean(
     status &&
+      updater?.installed &&
       (activeJob ||
         (available && status.state !== "current" && status.state !== "updater_unavailable")),
   );
@@ -388,6 +392,20 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
       upgradeReason = STATE_DISABLED_REASONS[status.state];
     }
   }
+
+  // Dense (card/table) variants render no Compatibility/Release detail rows:
+  // when the Upgrade button is hidden (available === null) surface the
+  // specific incompatible/unavailable reason next to the state chip instead
+  // of a chip-only row.
+  const denseReason =
+    dense && !upgradeReason && status
+      ? status.state === "incompatible"
+        ? INCOMPATIBLE_REASONS[status.compatibility.reason]
+        : status.state === "release_unavailable"
+          ? STATE_DISABLED_REASONS.release_unavailable
+          : null
+      : null;
+  const displayedReason = upgradeReason ?? denseReason;
 
   const installedText = installed
     ? installed.buildId
@@ -456,17 +474,23 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
       );
     } else if (resultJob.state === "rolled_back") {
       liveContent = (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-amber-300">
-          <AlertTriangle size={13} aria-hidden="true" />
-          <span>
-            Upgrade failed and rolled back — the previous build was verified by heartbeat.
-            {resultJob.error ? ` ${resultJob.error.message}` : ""}
-          </span>
-          {finishedAt ? (
-            <span className="text-white/45" title={formatDate(completedAt)}>
-              {finishedAt}
+        <div className="space-y-1 text-xs text-amber-300">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <AlertTriangle size={13} aria-hidden="true" />
+            <span>
+              Upgrade failed and rolled back — the previous build was verified by heartbeat.
+              {resultJob.error ? ` ${resultJob.error.message}` : ""}
             </span>
-          ) : null}
+            {finishedAt ? (
+              <span className="text-white/45" title={formatDate(completedAt)}>
+                {finishedAt}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-white/55">
+            The previous build is still running — inspect the failed step on the host with
+            <span className="font-mono"> journalctl -u vps-manager-agent</span>, then retry the upgrade.
+          </p>
         </div>
       );
     } else if (resultJob.state === "rollback_unverified") {
@@ -513,11 +537,13 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
     <>
       {showUpgrade ? (
         <Button
+          ref={upgradeTriggerRef}
           type="button"
           size="sm"
           variant="default"
           className={dense ? "text-[11px]" : undefined}
           disabled={!upgradeEnabled}
+          aria-describedby={upgradeReason ? reasonId : undefined}
           onClick={() => {
             setActionError(null);
             setConfirmOpen(true);
@@ -593,15 +619,20 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
           ) : null}
         </div>
       ) : null}
-      {liveContent ? (
-        <div role="status" aria-live="polite" className={dense ? "mt-1" : "mt-2"}>
-          {liveContent}
-        </div>
-      ) : null}
+      {/* Persistent empty live region: job start/results are only reliably
+          announced when the container already exists before the content is
+          inserted, so it stays mounted whenever the status details render. */}
+      <div role="status" aria-live="polite">
+        {liveContent ? (
+          <div className={dense ? "mt-1" : "mt-2"}>{liveContent}</div>
+        ) : null}
+      </div>
       <div className={dense ? "mt-1 flex flex-wrap items-center gap-2" : "mt-2 flex flex-wrap items-center gap-2"}>
         {actions}
       </div>
-      {upgradeReason ? <p className="mt-1 text-[11px] text-white/45">{upgradeReason}</p> : null}
+      {displayedReason ? (
+        <p id={reasonId} className="mt-1 text-[11px] text-white/45">{displayedReason}</p>
+      ) : null}
       {actionError ? (
         <p role="alert" className="mt-1 text-[11px] text-red-300">
           {actionError}
@@ -651,7 +682,10 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
             if (!open) setConfirmOpen(false);
           }}
         >
-          <AlertDialogContent>
+          <AlertDialogContent onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            upgradeTriggerRef.current?.focus();
+          }}>
             <AlertDialogHeader>
               <AlertDialogTitle>Upgrade agent on {displayName}?</AlertDialogTitle>
               <AlertDialogDescription>

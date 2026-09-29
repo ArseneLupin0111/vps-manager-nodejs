@@ -13,7 +13,10 @@ import type { LocalUpgradeRepository } from "../src/persistence/repositories/loc
 import { createJsonLocalUpgradeRepository } from "../src/persistence/repositories/local-upgrade.repository.js";
 import type { VpsRepository } from "../src/persistence/repositories/vps.repository.js";
 import { createVpsStore } from "../src/persistence/store/vpsStore.js";
-import { LocalUpgradeService } from "../src/local-upgrade/local-upgrade.service.js";
+import {
+  LocalUpgradeService,
+  type CreateLocalUpgradeResult,
+} from "../src/local-upgrade/local-upgrade.service.js";
 import type { LocalUpgradeJob } from "../src/local-upgrade/local-upgrade.models.js";
 import {
   LOCAL_UPGRADE_LEASE_TTL_MS,
@@ -100,6 +103,24 @@ function makeService(mode: "local" | "demo" = "local") {
     new AuditService(config, createJsonAuditRepository(join(tempDir, "data", "audit.json"))),
   );
   return { service, catalog };
+}
+
+/**
+ * Read the shared audit file through a fresh service instance — the same
+ * wiring production uses, so what a test sees is what ops would query.
+ */
+async function readAudit(action?: string) {
+  const config: AppConfig = {
+    ...baseConfig,
+    mode: "local",
+    dataDir: join(tempDir, "data"),
+    privateDir: join(tempDir, "private"),
+  };
+  const audit = new AuditService(
+    config,
+    createJsonAuditRepository(join(tempDir, "data", "audit.json")),
+  );
+  return action ? audit.list({ action }) : audit.list();
 }
 
 function okRelease(
@@ -1028,5 +1049,293 @@ describe("admin reads", () => {
       .catch((e: unknown) => e);
     const body = (caught as { getResponse: () => ErrorBody }).getResponse();
     expect(body.error?.code).toBe("job_not_found");
+  });
+});
+
+// ── claim auditing (identifiers only, never secrets) ────────────────────
+
+describe("claim auditing", () => {
+  it("records which credential claimed the lease without secrets", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    const { job } = await createJob(service);
+
+    const claimed = (await service.claim(cred))!;
+    expect(claimed.job.fencingToken).toBe(1);
+
+    const events = await readAudit("local_agent_upgrade.claim");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      actor: "system",
+      action: "local_agent_upgrade.claim",
+      resourceType: "vps",
+      resourceId: LOCAL_VPS_ID,
+      jobId: job.id,
+      result: "success",
+    });
+    expect(events[0]?.metadata).toMatchObject({
+      releaseId: RELEASE_SHA,
+      credentialId: cred.id,
+      fencingToken: 1,
+      reclaimCount: 0,
+      phase: "claimed",
+    });
+    // Identifiers only: no bearer material, hashes, or free-form secrets.
+    expect(JSON.stringify(events[0])).not.toMatch(
+      /secret|secretHash|authorization|bearer/i,
+    );
+  });
+
+  it("does not duplicate claim audits on lease-valid replay", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    await createJob(service);
+
+    await service.claim(cred);
+    await service.claim(cred);
+    expect(await readAudit("local_agent_upgrade.claim")).toHaveLength(1);
+  });
+});
+
+// ── concurrent create ───────────────────────────────────────────────────
+
+describe("concurrent create", () => {
+  it("serializes two racing creates onto one active job", async () => {
+    await localVps();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    await touchHeartbeat();
+    await upsertBuild(BASELINE_SHA);
+
+    const settled = await Promise.allSettled([
+      service.createJob(
+        LOCAL_VPS_ID,
+        { releaseId: RELEASE_SHA },
+        { idempotencyKey: "race-a" },
+      ),
+      service.createJob(
+        LOCAL_VPS_ID,
+        { releaseId: RELEASE_SHA },
+        { idempotencyKey: "race-b" },
+      ),
+    ]);
+
+    const wins = settled.filter(
+      (r): r is PromiseFulfilledResult<CreateLocalUpgradeResult> =>
+        r.status === "fulfilled",
+    );
+    const losses = settled.filter(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(1);
+    expect(wins[0]!.value.created).toBe(true);
+    // Loser sees the single-active rule with the winning job's id.
+    const loser = losses[0]!.reason;
+    expect(loser.getStatus()).toBe(409);
+    expect(loser.getResponse().error.code).toBe("active_job_exists");
+    expect(loser.getResponse().error.jobId).toBe(wins[0]!.value.job.id);
+  });
+});
+
+// ── result replay idempotency ───────────────────────────────────────────
+
+describe("result replay", () => {
+  it("replays an identical terminal verdict instead of 409", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    const { job } = await createJob(service);
+    await service.claim(cred);
+
+    const first = await service.result(cred, job.id, {
+      fencingToken: 1,
+      outcome: "failed",
+      reason: "boom",
+    });
+    expect(first.job.state).toBe("failed");
+
+    // Lost-response retry: same token, same verdict → committed ruling back.
+    const replay = await service.result(cred, job.id, {
+      fencingToken: 1,
+      outcome: "failed",
+      reason: "boom",
+    });
+    expect(replay.job.id).toBe(job.id);
+    expect(replay.job.state).toBe("failed");
+    expect(replay.job.revision).toBe(first.job.revision);
+    expect(replay.awaitHeartbeat).toBeUndefined();
+  });
+
+  it("rejects a conflicting verdict or stale token on a terminal job", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    const { job } = await createJob(service);
+    await service.claim(cred);
+    await service.result(cred, job.id, {
+      fencingToken: 1,
+      outcome: "failed",
+      reason: "boom",
+    });
+
+    await expectHttpError(
+      service.result(cred, job.id, {
+        fencingToken: 1,
+        outcome: "rolled_back",
+      }),
+      409,
+      "job_terminal",
+    );
+    await expectHttpError(
+      service.result(cred, job.id, { fencingToken: 99, outcome: "failed" }),
+      409,
+      "job_terminal",
+    );
+  });
+});
+
+// ── post-swap failure safety ────────────────────────────────────────────
+
+describe("post-swap failure safety", () => {
+  it("keeps a pre-swap failed report as failed", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    const { job } = await createJob(service);
+    await service.claim(cred);
+
+    const outcome = await service.result(cred, job.id, {
+      fencingToken: 1,
+      outcome: "failed",
+      reason: "checksum mismatch",
+    });
+    expect(outcome.job.state).toBe("failed");
+    expect(outcome.job.error?.code).toBe("update_failed");
+    expect(outcome.job.result?.outcome).toBe("failed");
+    expect(outcome.job.completedAt).not.toBeNull();
+  });
+
+  it("settles a post-swap failed report as rollback_unverified", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    await upsertBuild(BASELINE_SHA);
+    const { job } = await createJob(service);
+    const claimed = (await service.claim(cred))!;
+    await progressTo(claimed.job, cred, service, "restarting", 80);
+
+    // Updater-visible contract: still 200 with the settled job — never an
+    // error code the updater cannot map (it only knows stale_lease and
+    // job_terminal). The host must retain backup + journal.
+    const outcome = await service.result(cred, job.id, {
+      fencingToken: 1,
+      outcome: "failed",
+      reason: "service would not start",
+    });
+    expect(outcome.job.state).toBe("rollback_unverified");
+    expect(outcome.job.error?.code).toBe("post_swap_failed");
+    expect(outcome.job.error?.message).toMatch(/binary swap/i);
+    expect(outcome.job.result?.outcome).toBe("rollback_unverified");
+    expect(outcome.job.completedAt).not.toBeNull();
+
+    const rollbacks = await readAudit("local_agent_upgrade.rollback");
+    expect(rollbacks).toHaveLength(1);
+    expect(rollbacks[0]?.metadata).toMatchObject({
+      reason: "service would not start",
+      reportedOutcome: "failed",
+    });
+
+    // A retried post-swap failed report replays the settled ruling.
+    const replay = await service.result(cred, job.id, {
+      fencingToken: 1,
+      outcome: "failed",
+      reason: "service would not start",
+    });
+    expect(replay.job.state).toBe("rollback_unverified");
+    expect(replay.job.revision).toBe(outcome.job.revision);
+  });
+
+  it("settles a rolling_back failed report as rollback_unverified", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    await upsertBuild(BASELINE_SHA);
+    const { job } = await createJob(service);
+    const claimed = (await service.claim(cred))!;
+    const restarting = await progressTo(
+      claimed.job,
+      cred,
+      service,
+      "restarting",
+      80,
+    );
+    await service.progress(cred, job.id, {
+      fencingToken: 1,
+      phase: "rolling_back",
+      progress: 50,
+    });
+    expect(restarting.state).toBe("restarting");
+
+    const outcome = await service.result(cred, job.id, {
+      fencingToken: 1,
+      outcome: "failed",
+      reason: "rollback helper crashed",
+    });
+    expect(outcome.job.state).toBe("rollback_unverified");
+    expect(outcome.job.error?.code).toBe("post_swap_failed");
+    expect(outcome.job.result?.outcome).toBe("rollback_unverified");
+  });
+});
+
+// ── restart / multi-instance ────────────────────────────────────────────
+
+describe("restart resilience", () => {
+  it("a fresh service instance continues the durable job", async () => {
+    await localVps();
+    const cred = await credential();
+    const { service, catalog } = makeService();
+    vi.mocked(catalog.getReleaseById).mockResolvedValue(okRelease() as never);
+    const { job } = await createJob(service);
+
+    // Fresh objects over the same store: the service holds no in-memory
+    // coordinator, so a restarted API (or a second instance) sees the job.
+    const config: AppConfig = {
+      ...baseConfig,
+      mode: "local",
+      dataDir: join(tempDir, "data"),
+      privateDir: join(tempDir, "private"),
+    };
+    const restartedCatalog = {
+      getCompatibleRelease: vi.fn(),
+      getReleaseById: vi.fn(),
+    } as unknown as ReleaseCatalog;
+    const restarted = new LocalUpgradeService(
+      config,
+      createJsonLocalUpgradeRepository(
+        join(tempDir, "data", "local-upgrades.json"),
+      ),
+      createJsonAgentRepository(join(tempDir, "data", "agents.json")),
+      createVpsStore(join(tempDir, "data", "vps.json")),
+      restartedCatalog,
+      new AuditService(
+        config,
+        createJsonAuditRepository(join(tempDir, "data", "audit.json")),
+      ),
+    );
+
+    const claimed = await restarted.claim(cred);
+    expect(claimed?.job.id).toBe(job.id);
+    expect(claimed?.job.fencingToken).toBe(1);
+    expect(claimed?.requiresReconcile).toBe(false);
   });
 });

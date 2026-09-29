@@ -102,7 +102,8 @@ afterEach(async () => {
   if (initialEnv.AGENT_RELEASE_PUBLIC_KEY === undefined) {
     delete process.env.AGENT_RELEASE_PUBLIC_KEY;
   }
-  process.env.AGENT_RELEASE_MANIFEST_URL = initialEnv.AGENT_RELEASE_MANIFEST_URL;
+  process.env.AGENT_RELEASE_MANIFEST_URL =
+    initialEnv.AGENT_RELEASE_MANIFEST_URL;
   if (initialEnv.AGENT_RELEASE_MANIFEST_URL === undefined) {
     delete process.env.AGENT_RELEASE_MANIFEST_URL;
   }
@@ -320,12 +321,16 @@ describe("job lifecycle over HTTP", () => {
     expect(list.body.data[0].id).toBe(created.id);
 
     const fetched = await withCookie(
-      request(server).get(`/api/vps/${vpsId}/local-agent-upgrades/${created.id}`),
+      request(server).get(
+        `/api/vps/${vpsId}/local-agent-upgrades/${created.id}`,
+      ),
     ).expect(200);
     expect(fetched.body.data.id).toBe(created.id);
 
     const missing = await withCookie(
-      request(server).get(`/api/vps/${vpsId}/local-agent-upgrades/lug_abcdefghijkl`),
+      request(server).get(
+        `/api/vps/${vpsId}/local-agent-upgrades/lug_abcdefghijkl`,
+      ),
     ).expect(404);
     expect(missing.body.error.code).toBe("job_not_found");
 
@@ -378,7 +383,9 @@ describe("job lifecycle over HTTP", () => {
 
 describe("local-updater credential isolation", () => {
   it("rejects requests without a bearer token", async () => {
-    const res = await request(serveApp()).post("/api/local-updater/jobs/claim").expect(401);
+    const res = await request(serveApp())
+      .post("/api/local-updater/jobs/claim")
+      .expect(401);
     expect(res.body.error.message).toBe("Missing authorization header");
   });
 
@@ -449,9 +456,19 @@ describe("claim, progress and result", () => {
       .post("/api/local-updater/jobs/claim")
       .set(auth)
       .expect(200);
+    expect(claim1.body.data.job).toMatchObject({
+      jobId: job.id,
+      phase: "claimed",
+      manifestRaw: expect.any(String),
+      release: {
+        releaseId: RELEASE_SHA,
+        buildId: RELEASE_SHA,
+        targetSha256: expect.any(String),
+      },
+    });
     expect(claim1.body.data.job.state).toBe("claimed");
     expect(claim1.body.data.job.fencingToken).toBe(1);
-    expect(claim1.body.data.job.claimedAt).toEqual(expect.any(String));
+    expect(claim1.body.data.job.jobId).toBe(job.id);
     expect(claim1.body.data.job.leaseExpiresAt).toEqual(expect.any(String));
     expect(claim1.body.data.requiresReconcile).toBe(false);
 
@@ -511,7 +528,11 @@ describe("claim, progress and result", () => {
     const early = await request(server)
       .post(`/api/local-updater/jobs/${job.id}/result`)
       .set(auth)
-      .send({ fencingToken: 1, outcome: "succeeded", reportedBuildId: RELEASE_SHA })
+      .send({
+        fencingToken: 1,
+        outcome: "succeeded",
+        reportedBuildId: RELEASE_SHA,
+      })
       .expect(200);
     expect(early.body.data.awaitHeartbeat).toBe(true);
     expect(early.body.data.job.state).toBe("awaiting_heartbeat");
@@ -520,7 +541,11 @@ describe("claim, progress and result", () => {
     const confirmed = await request(server)
       .post(`/api/local-updater/jobs/${job.id}/result`)
       .set(auth)
-      .send({ fencingToken: 1, outcome: "succeeded", reportedBuildId: RELEASE_SHA })
+      .send({
+        fencingToken: 1,
+        outcome: "succeeded",
+        reportedBuildId: RELEASE_SHA,
+      })
       .expect(200);
     expect(confirmed.body.data.awaitHeartbeat).toBeUndefined();
     expect(confirmed.body.data.job.state).toBe("succeeded");
