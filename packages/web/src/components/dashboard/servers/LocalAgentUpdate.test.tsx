@@ -235,6 +235,52 @@ describe("LocalAgentUpdate disabled upgrade control", () => {
     expect(screen.getByText("The release catalog is unavailable — try again shortly.")).toBeInTheDocument();
     expect(screen.queryByText(/unavailable right now/)).not.toBeInTheDocument();
   });
+
+  it("associates the disabled upgrade button with its reason for assistive tech", async () => {
+    handler = () =>
+      ok(
+        status({
+          state: "unknown",
+          installed: { version: "1.0.0", buildId: null, lastSeenAt: "2026-01-01T00:00:00.000Z", fresh: false },
+        }),
+      );
+    render(<LocalAgentUpdate vps={vps} variant="card" />);
+
+    const button = await screen.findByRole("button", { name: "Upgrade agent" });
+    expect(button).toBeDisabled();
+    const describedBy = button.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const reason = document.getElementById(describedBy as string);
+    expect(reason).not.toBeNull();
+    expect(reason).toHaveTextContent(/heartbeat is stale or the build ID is missing/);
+  });
+
+  it("shows the incompatible reason in the dense table row when no upgrade button is rendered", async () => {
+    handler = () =>
+      ok(
+        status({
+          state: "incompatible",
+          available: null,
+          compatibility: { compatible: false, apiContractVersion: 1, reason: "unsupported_architecture" },
+        }),
+      );
+    render(<LocalAgentUpdate vps={vps} variant="table" />);
+
+    expect(await screen.findByText("Update blocked")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upgrade agent" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("No release artifact matches this host's operating system and architecture."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the release-unavailable reason in the dense card row when no upgrade button is rendered", async () => {
+    handler = () => ok(status({ state: "release_unavailable", available: null }));
+    render(<LocalAgentUpdate vps={vps} variant="card" />);
+
+    expect(await screen.findByText("Release unavailable")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upgrade agent" })).not.toBeInTheDocument();
+    expect(screen.getByText("The release catalog is unavailable — try again shortly.")).toBeInTheDocument();
+  });
 });
 
 describe("LocalAgentUpdate live SSE refresh", () => {
@@ -328,6 +374,22 @@ describe("LocalAgentUpdate manual instructions", () => {
     expect(script).toHaveTextContent("bbbb1111bbbb2222bbbb3333bbbb4444bbbb5555");
     expect(within(dialog).getAllByText(/release rel-2001/).length).toBeGreaterThan(0);
   });
+
+  it("hides the upgrade button whenever the updater is absent, even with a release available", async () => {
+    handler = () =>
+      ok(
+        status({
+          state: "unknown",
+          installed: { version: "1.0.0", buildId: null, lastSeenAt: "2026-01-01T00:00:00.000Z", fresh: false },
+          updater: { installed: false, healthy: false, lastSeenAt: null },
+        }),
+      );
+    render(<LocalAgentUpdate vps={vps} variant="card" />);
+
+    await screen.findByText("Update status unknown");
+    expect(screen.queryByRole("button", { name: "Upgrade agent" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View update instructions" })).toBeInTheDocument();
+  });
 });
 
 describe("LocalAgentUpdate terminal results", () => {
@@ -365,6 +427,23 @@ describe("LocalAgentUpdate terminal results", () => {
     expect(await screen.findByText(/rollback is unverified — manual intervention required/)).toBeInTheDocument();
     expect(screen.getByText(/journalctl -u vps-manager-agent/)).toBeInTheDocument();
     expect(screen.queryByText(/failed before the agent was swapped/)).not.toBeInTheDocument();
+  });
+
+  it("pairs a verified rollback with operational guidance", async () => {
+    handler = () =>
+      ok(
+        status({
+          state: "unknown",
+          available: null,
+          job: job({ state: "rolled_back", completedAt: "2026-09-27T10:05:00.000Z", error: { code: "HEARTBEAT_TIMEOUT", message: "New build missed its heartbeat" } }),
+        }),
+      );
+    render(<LocalAgentUpdate vps={vps} variant="workspace" />);
+    expect(await screen.findByText(/previous build was verified by heartbeat/)).toBeInTheDocument();
+    expect(screen.getByText(/New build missed its heartbeat/)).toBeInTheDocument();
+    expect(screen.getByText(/journalctl -u vps-manager-agent/)).toBeInTheDocument();
+    expect(screen.getByText(/retry the upgrade/)).toBeInTheDocument();
+    expect(screen.queryByText(/manual intervention required/)).not.toBeInTheDocument();
   });
 
   it("renders a plain failure distinctly from a rollback", async () => {
@@ -412,5 +491,34 @@ describe("LocalAgentUpdate freshness gating", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.getByText("Waiting for fresh heartbeat").closest('[aria-live="polite"]')).not.toBeNull();
     expect(screen.getByText(/target 1\.1\.0/)).toBeInTheDocument();
+  });
+});
+
+describe("LocalAgentUpdate live region persistence", () => {
+  it("keeps an empty status region mounted before any job so start and results are announced", async () => {
+    vi.useFakeTimers();
+    handler = () => ok(status());
+    render(<LocalAgentUpdate vps={vps} variant="card" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // No job yet: the live region must already exist, empty.
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    const region = screen.getByRole("status");
+    expect(region).toBeEmptyDOMElement();
+
+    // The next status poll delivers a job; content lands in the SAME region
+    // node so assistive tech announces the insertion instead of the node.
+    handler = (url) =>
+      url.includes("/agent-update")
+        ? ok(status({ job: job({ state: "downloading", progress: 10 }), state: "available" }))
+        : ok(job({ state: "downloading", progress: 10 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("Downloading release");
   });
 });

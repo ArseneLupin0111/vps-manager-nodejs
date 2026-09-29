@@ -135,6 +135,21 @@ func (d *Daemon) stepClaim(ctx context.Context) {
 // runJob advances the journal to completion (consume or hold). Each step is
 // restartable from the journal alone.
 func (d *Daemon) runJob(ctx context.Context, j *Journal) error {
+	// The privileged cleanup already ran: finish tearing down local state
+	// idempotently. Reconciling half-deleted evidence here (helper journal
+	// and backup gone, results gone) would misread the crash as a lost
+	// mutation and hold a job that is already being consumed. The helper's
+	// "cleaned" result is consulted too: a crash may land after the helper
+	// wrote it but before CleanupDone reached the journal.
+	cleanupDone := j.CleanupDone
+	if !cleanupDone {
+		if res, err := ReadResult(d.cfg.StateDir, actionCleanup, j.JobID); err == nil && res != nil && res.Outcome == "cleaned" {
+			cleanupDone = true
+		}
+	}
+	if cleanupDone {
+		return d.observeRuling(ctx, j)
+	}
 	// Post-swap truth always comes from disk first.
 	if j.PostSwap || j.SwapRequested || j.RequiresReconcile {
 		if err := d.reconcile(ctx, j); err != nil {
@@ -187,13 +202,21 @@ func (d *Daemon) reconcile(ctx context.Context, j *Journal) error {
 		if target == "" {
 			target = d.manifestArtifactSha(j)
 		}
+		if target == "" {
+			// An unusable manifest must never widen the reapply window:
+			// fall back to the server-issued target sha so the "binary is
+			// already the new build" guard still fires. Hold more, mutate less.
+			target = j.TargetSha256
+		}
 		if target != "" && actual == target {
 			// A completed swap without its root record means the root-owned
 			// journal vanished — never trust a mutation of unclear provenance.
+			j.PostSwap = true
 			return d.holdJob(ctx, j, "binary matches target build but root helper journal is missing")
 		}
 		if pendingExists {
 			if j.RequiresReconcile {
+				j.PostSwap = true
 				return d.holdJob(ctx, j, "post-swap reconcile found pending request but no root record")
 			}
 			// Crash after journal save, before the helper ran.
@@ -206,9 +229,11 @@ func (d *Daemon) reconcile(ctx context.Context, j *Journal) error {
 			if res, err := ReadResult(d.cfg.StateDir, actionApply, j.JobID); err == nil && res != nil && res.Outcome == "verify_failed" {
 				return d.failPreSwap(ctx, j, "helper refused apply: "+res.Detail)
 			}
+			j.PostSwap = true
 			return d.holdJob(ctx, j, "helper result without root journal: unclear mutation")
 		}
 		if j.RequiresReconcile {
+			j.PostSwap = true
 			return d.holdJob(ctx, j, "post-swap reconcile found no records on disk")
 		}
 		// Crash inside the tiny window between the journal save and writing
@@ -247,6 +272,7 @@ func (d *Daemon) reconcile(ctx context.Context, j *Journal) error {
 		j.NewSha256 = hj.NewSha256
 		return d.journal.Save(j)
 	default:
+		j.PostSwap = true
 		return d.holdJob(ctx, j, fmt.Sprintf(
 			"binary sha256 matches neither new (%s) nor old (%s); manual intervention",
 			j.NewSha256, j.OldSha256))
@@ -302,7 +328,9 @@ func (d *Daemon) runPreSwap(ctx context.Context, j *Journal) error {
 		}
 		// Execute the staged binary to confirm it reports the signed buildId.
 		binPath := filepath.Join(staging, "artifact.bin")
-		_ = os.Chmod(binPath, 0o700)
+		if err := os.Chmod(binPath, 0o755); err != nil {
+			return d.failPreSwap(ctx, j, "staged artifact permissions: "+err.Error())
+		}
 		vctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		line, err := execStagedVersion(vctx, binPath)
 		cancel()
@@ -463,6 +491,8 @@ func (d *Daemon) runRollingBack(ctx context.Context, j *Journal) error {
 		j.PostSwap = true
 		return d.holdJob(ctx, j, "rollback failed: "+res.Detail)
 	default:
+		// A rollback was requested at all: the swap definitely happened.
+		j.PostSwap = true
 		return d.holdJob(ctx, j, fmt.Sprintf("unexpected rollback outcome %q: %s", res.Outcome, res.Detail))
 	}
 }
@@ -524,11 +554,28 @@ func (d *Daemon) observeRuling(ctx context.Context, j *Journal) error {
 // consumeWithRuling applies the retention contract:
 //   - succeeded / rolled_back (server-ruled) → delete backup, consume job
 //   - failed (pre-swap) → consume, no backup exists
+//   - failed after a local post-swap phase → never clean up: the mutation is
+//     unclear, so keep backup + journal and hold (rollback_unverified
+//     semantics), regardless of how the server labeled it
 //   - rollback_unverified → keep backup + journal, hold all further jobs
 func (d *Daemon) consumeWithRuling(ctx context.Context, j *Journal, ruling string) error {
 	switch ruling {
-	case "succeeded", "rolled_back", "failed":
+	case "succeeded", "rolled_back":
 		d.logf("job %s: server ruling %s — cleaning up", j.JobID, ruling)
+		if err := d.consume(ctx, j); err != nil {
+			return err
+		}
+		return nil
+	case "failed":
+		if j.PostSwap {
+			// Local evidence says the swap was requested or performed: a
+			// server "failed" cannot prove the post-swap state safe to tear
+			// down. Deleting the backup here would destroy the only rollback
+			// source for an unclear mutation — retain everything and halt.
+			return d.holdJob(ctx, j,
+				"server ruled failed after a post-swap phase — retaining backup and journal")
+		}
+		d.logf("job %s: server ruling failed (pre-swap) — cleaning up", j.JobID)
 		if err := d.consume(ctx, j); err != nil {
 			return err
 		}
@@ -578,22 +625,42 @@ func (d *Daemon) holdJob(ctx context.Context, j *Journal, reason string) error {
 }
 
 // consume tears down local state after a ruled terminal outcome. Order
-// matters: helper cleanup (backup) first, then our own files, journal last —
-// a crash in between reruns cleanup idempotently.
+// matters: first stop every path-unit trigger for this job (its pending
+// requests and staging) — a retained pending file would let the helper
+// re-run apply/rollback against state the server already ruled on — then
+// the privileged cleanup (backup + helper journal), then the job's own
+// result files, journal last. Each step reruns idempotently; CleanupDone
+// skips the privileged part on rerun.
 func (d *Daemon) consume(ctx context.Context, j *Journal) error {
+	// Stop the job's path-unit triggers first: a retained apply/rollback
+	// request would let the helper re-run a job the server already ruled on.
+	_ = os.Remove(pendingPath(d.cfg.StateDir, actionApply, j.JobID))
+	_ = os.Remove(pendingPath(d.cfg.StateDir, actionRollback, j.JobID))
+	_ = os.RemoveAll(stagingDir(d.cfg.StateDir, j.JobID))
 	if !j.CleanupDone {
-		if _, err := d.ensureAction(ctx, actionCleanup, j.JobID); err != nil {
+		res, err := d.ensureAction(ctx, actionCleanup, j.JobID)
+		if err != nil {
 			return fmt.Errorf("helper cleanup: %w", err)
+		}
+		if res.Outcome != "cleaned" {
+			// Never finish consumption over a failed cleanup: the journal
+			// must survive so the ruling (and the retained backup) can be
+			// retried instead of silently orphaned.
+			return fmt.Errorf("helper cleanup: %s: %s", res.Outcome, res.Detail)
 		}
 		j.CleanupDone = true
 		if err := d.journal.Save(j); err != nil {
 			return err
 		}
 	}
-	_ = os.RemoveAll(stagingDir(d.cfg.StateDir, j.JobID))
+	// Torn down after the privileged step: the cleanup result must stay in
+	// place until ensureAction reads it, and removing the job's own files
+	// last also covers a helper run that was already in flight when the
+	// ruling landed.
 	_ = os.Remove(resultPath(d.cfg.StateDir, actionApply, j.JobID))
 	_ = os.Remove(resultPath(d.cfg.StateDir, actionRollback, j.JobID))
 	_ = os.Remove(resultPath(d.cfg.StateDir, actionCleanup, j.JobID))
+	_ = os.Remove(pendingPath(d.cfg.StateDir, actionCleanup, j.JobID))
 	if err := d.journal.Clear(); err != nil {
 		return err
 	}

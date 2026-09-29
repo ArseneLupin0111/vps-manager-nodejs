@@ -148,6 +148,22 @@ export function createPostgresAgentRepository(
       return rowToState(result.rows[0]!);
     },
 
+    async upsertSyntheticLocalState(state) {
+      const result = await pool.query<AgentStateRow>(
+        `INSERT INTO agent_states (vps_id, status, version, last_seen_at)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (vps_id) DO UPDATE SET
+           status = EXCLUDED.status,
+           version = EXCLUDED.version,
+           last_seen_at = EXCLUDED.last_seen_at
+         WHERE agent_states.version = '0.1.0-local'
+         RETURNING *`,
+        [state.vpsId, state.status, state.version, toDateOrNull(state.lastSeenAt)],
+      );
+      if (result.rows[0]) return rowToState(result.rows[0]);
+      return this.getState(state.vpsId);
+    },
+
     async upsertSystemInfo(info) {
       const result = await pool.query<AgentSystemInfoRow>(
         `INSERT INTO agent_system_info (

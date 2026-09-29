@@ -43,3 +43,7 @@ func (l *lockFile) release() {
 	}
 	_ = os.Remove(l.path)
 }
+
+// statIsRootOwned: Windows has no uid metadata (test-only build) — the
+// ownership half of requireSecureDir is skipped there.
+func statIsRootOwned(os.FileInfo) (bool, bool) { return false, false }

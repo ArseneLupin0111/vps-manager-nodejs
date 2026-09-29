@@ -105,6 +105,35 @@ func resultPath(stateDir, action, jobID string) string {
 	return filepath.Join(resultsDir(stateDir), jobID+"."+action+".json")
 }
 
+// requireSecureDir fail-closes the privileged helper against a planted
+// symlink. stateDir is group-writable by the updater user, so between two
+// helper runs that user could replace stateDir/helper or stateDir/results
+// with a link and redirect root-owned state (helper journal, backups and
+// RemoveAll targets) somewhere else. Every privileged path must be a real
+// directory and, when the helper runs as root, root-owned. A missing path
+// is acceptable — the caller creates it — and is re-checked after creation.
+func requireSecureDir(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink", path)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", path)
+	}
+	if os.Geteuid() == 0 {
+		if rooted, ok := statIsRootOwned(fi); ok && !rooted {
+			return fmt.Errorf("%s is not root-owned", path)
+		}
+	}
+	return nil
+}
+
 // PendingActions lists pending helper request file names (sorted by ReadDir),
 // for the status command.
 func PendingActions(stateDir string) ([]string, error) {
@@ -141,6 +170,11 @@ func LoadHelperJournal(stateDir string) (*HelperJournal, error) {
 }
 
 func saveHelperJournal(stateDir string, hj *HelperJournal) error {
+	// Fail closed: never create or replace the root-owned journal through a
+	// planted symlink in the updater-writable state dir.
+	if err := requireSecureDir(helperRoot(stateDir)); err != nil {
+		return err
+	}
 	hj.UpdatedAt = time.Now().UTC()
 	raw, err := json.MarshalIndent(hj, "", "  ")
 	if err != nil {
@@ -196,9 +230,20 @@ func ReadResult(stateDir, action, jobID string) (*HelperResult, error) {
 // accepts no argv — the daemon can only ask for actions the helper already
 // knows how to do with root-owned state.
 func RunHelper(ctx context.Context, cfg *Config) error {
+	// Fail closed before any privileged work: the state layout must be real
+	// directories, never planted symlinks (requireSecureDir).
+	if err := requireSecureDir(helperRoot(cfg.StateDir)); err != nil {
+		return err
+	}
+	if err := requireSecureDir(resultsDir(cfg.StateDir)); err != nil {
+		return err
+	}
 	// The results dir must exist before writeResult; the daemon owns the
 	// state layout but the helper cannot depend on that ordering.
 	if err := os.MkdirAll(resultsDir(cfg.StateDir), 0o770); err != nil {
+		return err
+	}
+	if err := requireSecureDir(resultsDir(cfg.StateDir)); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(pendingDir(cfg.StateDir))
@@ -233,9 +278,9 @@ func RunHelper(ctx context.Context, cfg *Config) error {
 			firstErr = err
 		}
 		if res.Outcome != "unclear" && res.Outcome != "rollback_failed" &&
-			res.Outcome != "verify_failed" && res.Outcome != "restart_failed_rollback_failed" {
-			// Consumed successfully; unclear outcomes keep the pending file so
-			// the daemon sees the pending request until it halts the job.
+			res.Outcome != "restart_failed_rollback_failed" {
+			// A verification failure guarantees no mutation and is terminal;
+			// leaving its request causes the path unit to spin until rate-limited.
 			_ = os.Remove(filepath.Join(pendingDir(cfg.StateDir), name))
 		}
 	}
@@ -272,7 +317,18 @@ func handleApply(ctx context.Context, cfg *Config, jobID string) *HelperResult {
 	}
 
 	staging := stagingDir(cfg.StateDir, jobID)
-	manifestRaw, err := os.ReadFile(filepath.Join(staging, "manifest.json"))
+	manifestPath := filepath.Join(staging, "manifest.json")
+	// Refuse a planted symlink: a replaced manifest must not redirect the
+	// privileged read (the signature check is the arbiter of content, but
+	// the read itself stays bounded to real staging files).
+	if fi, err := os.Lstat(manifestPath); err != nil {
+		res.Outcome, res.Detail = "verify_failed", "staging manifest missing: "+err.Error()
+		return res
+	} else if !fi.Mode().IsRegular() {
+		res.Outcome, res.Detail = "verify_failed", "staging manifest is not a regular file"
+		return res
+	}
+	manifestRaw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		res.Outcome, res.Detail = "verify_failed", "staging manifest missing: "+err.Error()
 		return res
@@ -345,6 +401,12 @@ func handleApply(ctx context.Context, cfg *Config, jobID string) *HelperResult {
 		return res
 	}
 
+	// Backups and the helper journal live under the helper root: fail closed
+	// if it was swapped for a symlink since the entry check.
+	if err := requireSecureDir(helperRoot(cfg.StateDir)); err != nil {
+		res.Outcome, res.Detail = "verify_failed", err.Error()
+		return res
+	}
 	// Backup the current binary (root-owned, unreadable/unwritable by the
 	// updater) before any mutation.
 	bdir := backupDir(cfg.StateDir, jobID)
@@ -482,10 +544,14 @@ func reconcileApply(ctx context.Context, cfg *Config, hj *HelperJournal, res *He
 		res.ServiceActive, _ = ensureServiceActive(ctx, cfg)
 		return res
 	case actual == hj.NewSha256:
-		// Swap happened; ensure the restart happened too, then stop.
-		if _, err := runSystemctl(ctx, "restart", cfg.AgentUnit); err == nil {
-			hj.Phase = hjRestarted
-			_ = saveHelperJournal(cfg.StateDir, hj)
+		// Swap happened. Restart only when the restart was never confirmed —
+		// re-triggering systemctl for an already-restarted job would keep
+		// re-running a mutation whose outcome is recorded (or held unclear).
+		if hj.Phase != hjRestarted {
+			if _, err := runSystemctl(ctx, "restart", cfg.AgentUnit); err == nil {
+				hj.Phase = hjRestarted
+				_ = saveHelperJournal(cfg.StateDir, hj)
+			}
 		}
 		res.ServiceActive, res.Detail = ensureServiceActive(ctx, cfg)
 		if res.ServiceActive {
@@ -541,12 +607,26 @@ func handleRollback(ctx context.Context, cfg *Config, jobID string) *HelperResul
 }
 
 // handleCleanup deletes the root-owned backup for a job the server has ruled
-// on. The daemon only requests it after observing the terminal ruling.
+// on. The daemon only requests it after observing the terminal ruling, and
+// only after it stopped the job's own path-unit triggers.
 func handleCleanup(_ context.Context, cfg *Config, jobID string) *HelperResult {
 	res := &HelperResult{JobID: jobID, Action: actionCleanup}
+	// RemoveAll follows the final path component: refuse to run it through a
+	// planted symlink in the updater-writable state dir.
+	if err := requireSecureDir(helperRoot(cfg.StateDir)); err != nil {
+		res.Outcome, res.Detail = "cleanup_failed", err.Error()
+		return res
+	}
 	if err := os.RemoveAll(backupDir(cfg.StateDir, jobID)); err != nil {
 		res.Outcome, res.Detail = "cleanup_failed", err.Error()
 		return res
+	}
+	// The helper journal exists to protect this backup. Once the backup is
+	// gone (ruled terminal) a stale journal would drive reconciliation of a
+	// consumed job — remove it, but only when it belongs to this job.
+	if hj, err := LoadHelperJournal(cfg.StateDir); err == nil && hj != nil && hj.JobID == jobID {
+		_ = os.Remove(helperJournalPath(cfg.StateDir))
+		_ = fsyncDir(helperRoot(cfg.StateDir))
 	}
 	res.Outcome = "cleaned"
 	return res
@@ -583,6 +663,14 @@ func ensureServiceActive(ctx context.Context, cfg *Config) (bool, string) {
 // destination) while hashing, enforcing an optional expected sha and size.
 // When wantSHA is empty it just returns the computed hash.
 func copyHashed(src, dst, wantSHA string, wantSize int64) (string, error) {
+	// Lstat before Open: a FIFO or symlink planted at src in the
+	// updater-writable staging dir must not hang or redirect the privileged
+	// read (content is hash-bound anyway; this keeps the read bounded).
+	if sfi, err := os.Lstat(src); err != nil {
+		return "", err
+	} else if !sfi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", src)
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return "", err

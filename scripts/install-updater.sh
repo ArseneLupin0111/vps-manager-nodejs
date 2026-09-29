@@ -179,7 +179,7 @@ if [[ "$UNINSTALL" == "true" ]]; then
     fi
   elif [[ -d "$STATE_DIR" ]]; then
     echo "[Uninstall] Preserved ${STATE_DIR} (journals/backups; use --purge-state to remove)."
-    echo "[Uninstall] Offline recovery: see docs/local-agent-upgrade-plan.md runbook."
+    echo "[Uninstall] Offline recovery: see docs/local-agent-upgrade-operations.md runbook."
   fi
   echo "[Uninstall] The agent unit ${UNIT_HELPER##*/} was not modified; vps-manager-agent keeps running."
   exit 0
@@ -375,6 +375,10 @@ fi
 # Binary (directory not writable by the updater user: it cannot replace
 # itself; only the fixed helper may touch /usr/local/bin/vps-manager-agent).
 run mkdir -p "$(dirname "$BINARY_DEST")"
+# Existing agent installations may keep this root-owned directory at 0700.
+# The unprivileged updater needs traversal, not write access.
+run chown root:root "$(dirname "$BINARY_DEST")"
+run chmod 0755 "$(dirname "$BINARY_DEST")"
 run cp -f "$BINARY_SRC" "$BINARY_DEST"
 run chown root:root "$BINARY_DEST"
 run chmod 0755 "$BINARY_DEST"
@@ -555,6 +559,6 @@ echo "  Service:  vps-updater.service  (pull-only daemon, user ${SERVICE_USER})"
 echo "  Trigger:  vps-updater-apply.path -> vps-updater-apply.service (root, fixed argv)"
 echo ""
 echo "Check status: sudo ${BINARY_DEST} status -config ${CONFIG_FILE}"
-echo "Ack a hold:   sudo ${BINARY_DEST} ack -config ${CONFIG_FILE}"
+echo "Ack a hold:   sudo -u ${SERVICE_USER} ${BINARY_DEST} ack -config ${CONFIG_FILE}"
 echo "View logs:    sudo journalctl -u vps-updater.service -f"
-echo "Runbook:      docs/local-agent-upgrade-plan.md"
+echo "Runbook:      docs/local-agent-upgrade-operations.md"

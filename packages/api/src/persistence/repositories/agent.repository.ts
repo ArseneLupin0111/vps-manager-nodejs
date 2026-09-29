@@ -27,6 +27,8 @@ export type AgentRepository = {
 
   getState(vpsId: string): Promise<AgentState | undefined>;
   upsertState(state: AgentState): Promise<AgentState>;
+  /** Only synthesize local state while no real agent owns the heartbeat. */
+  upsertSyntheticLocalState(state: AgentState): Promise<AgentState | undefined>;
   listStates(): Promise<AgentState[]>;
 
   upsertSystemInfo(info: AgentSystemInfo): Promise<AgentSystemInfo>;
@@ -126,6 +128,25 @@ export function createJsonAgentRepository(
           return data;
         },
       ).then(() => state);
+    },
+
+    async upsertSyntheticLocalState(state) {
+      let stored: AgentState | undefined;
+      await readModifyWriteJsonFile<AgentFile>(
+        filePath,
+        { credentials: [], states: {} },
+        (data) => {
+          const current = data.states[state.vpsId];
+          if (!current || current.version === "0.1.0-local") {
+            data.states[state.vpsId] = state;
+            stored = state;
+          } else {
+            stored = current;
+          }
+          return data;
+        },
+      );
+      return stored;
     },
 
     async listStates() {

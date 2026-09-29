@@ -469,10 +469,10 @@ func TestHelperRejectsTamperedManifestNoSwap(t *testing.T) {
 	if events.contains("systemctl:restart") {
 		t.Fatalf("service must not be restarted for a rejected manifest: %v", events.items)
 	}
-	// verify_failed keeps the pending file: the daemon still sees the request
-	// until it fails the job pre-swap.
-	if _, err := os.Stat(pendingPath(cfg.StateDir, actionApply, faultJobID)); err != nil {
-		t.Fatalf("pending apply must be retained on verify_failed: %v", err)
+	// Verification failure is terminal and cannot mutate the binary; the
+	// helper must consume the request or systemd's path unit loops forever.
+	if _, err := os.Stat(pendingPath(cfg.StateDir, actionApply, faultJobID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pending apply must be consumed on verify_failed: %v", err)
 	}
 }
 
@@ -1059,4 +1059,369 @@ func TestDaemonRollbackOnHeartbeatTimeout(t *testing.T) {
 	if _, err := os.Stat(backupDir(cfg.StateDir, faultJobID)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("backup must be cleaned after rolled_back ruling: %v", err)
 	}
+}
+
+// ---------- hold acknowledgment, post-swap retention, cleanup boundaries ----------
+
+// heldPostSwapJob seeds on-disk state for an applied-but-unclear job:
+// binary already swapped, backup of the OLD binary retained, helper journal
+// at restarted, the helper result "unclear" with its apply request retained,
+// and the root journal on hold in terminal post-swap phase.
+func heldPostSwapJob(t *testing.T, cfg *Config, rel *releaseFixture, oldContent []byte) *JournalStore {
+	t.Helper()
+	writeFile(t, cfg.AgentBinary, rel.content, 0o755)
+	backupPath := filepath.Join(backupDir(cfg.StateDir, faultJobID), "agent-binary")
+	writeFile(t, backupPath, oldContent, 0o755)
+	if err := os.MkdirAll(helperRoot(cfg.StateDir), 0o755); err != nil {
+		t.Fatalf("mkdir helper root: %v", err)
+	}
+	if err := saveHelperJournal(cfg.StateDir, &HelperJournal{
+		JobID: faultJobID, Phase: hjRestarted,
+		OldSha256: SHA256Hex(oldContent), NewSha256: rel.sha, BackupPath: backupPath,
+	}); err != nil {
+		t.Fatalf("save helper journal: %v", err)
+	}
+	seedStaging(t, cfg, rel)
+	if err := os.MkdirAll(resultsDir(cfg.StateDir), 0o770); err != nil {
+		t.Fatalf("mkdir results: %v", err)
+	}
+	if err := writeResult(cfg.StateDir, &HelperResult{
+		JobID: faultJobID, Action: actionApply, Outcome: "unclear",
+		Detail: "post-swap journal write failed", BinarySha256: rel.sha,
+	}); err != nil {
+		t.Fatalf("seed result: %v", err)
+	}
+	writePending(t, cfg, actionApply, faultJobID)
+	store := NewJournalStore(cfg.StateDir)
+	j := &Journal{
+		JobID: faultJobID, FencingToken: 1, RequiresReconcile: true,
+		ReleaseID: rel.releaseID, Version: "9.9.9", BuildID: rel.buildID,
+		TargetSha256: rel.sha, ManifestRaw: string(rel.manifestRaw),
+		Phase: PhaseTerminal, SwapRequested: true, PostSwap: true,
+		OldSha256: SHA256Hex(oldContent), NewSha256: rel.sha,
+		Outcome: "rollback_unverified", ReportedToServer: true,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.Save(j); err != nil {
+		t.Fatalf("save journal: %v", err)
+	}
+	return store
+}
+
+// TestHoldAckNoReapplyOnPostSwapFailed: after the operator acknowledges the
+// hold (ack clears Hold), a server ruling of "failed" for the post-swap job
+// must not be treated as safe cleanup. The daemon has to re-hold with
+// backup, staging and journal intact, never claim or re-apply, and the
+// helper must not re-run swap or restart for the unclear mutation.
+func TestHoldAckNoReapplyOnPostSwapFailed(t *testing.T) {
+	rel := newRelease(t, []byte("NEW-binary-held-unclear"), "https://example.com/agent")
+	cfg := testConfig(t, rel)
+	events := &eventLog{}
+	fs := installSeams(t, events, rel.buildID)
+	oldContent := []byte("OLD-agent-binary")
+	store := heldPostSwapJob(t, cfg, rel, oldContent)
+
+	// The server has already settled this job with ruling "failed".
+	api := newFakeAPI(&ClaimedJob{
+		JobID: faultJobID, Phase: "failed", FencingToken: 1,
+		ManifestRaw: string(rel.manifestRaw),
+	}, events)
+	startHelperLoop(t, cfg, events) // path unit fires: the pending dir is non-empty
+
+	// Operator acknowledgment — exactly what `vps-updater ack` persists.
+	j, err := store.Load()
+	if err != nil || j == nil {
+		t.Fatalf("load journal: %v / %v", j, err)
+	}
+	j.Hold = false
+	j.Reason = "operator acknowledged hold; cleared by vps-updater ack"
+	if err := store.Save(j); err != nil {
+		t.Fatalf("ack save: %v", err)
+	}
+
+	d := NewDaemon(cfg, api)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := d.runJob(ctx, j); err != nil {
+		t.Fatalf("runJob after ack: %v", err)
+	}
+
+	j2, err := store.Load()
+	if err != nil || j2 == nil {
+		t.Fatalf("journal must survive a post-swap failed ruling: %v / %v", j2, err)
+	}
+	if !j2.Hold || j2.Phase != PhaseTerminal {
+		t.Fatalf("want re-hold at terminal, got hold=%v phase=%s reason=%q",
+			j2.Hold, j2.Phase, j2.Reason)
+	}
+	if !j2.PostSwap {
+		t.Fatalf("post-swap flag must remain set")
+	}
+	backupPath := filepath.Join(backupDir(cfg.StateDir, faultJobID), "agent-binary")
+	if got := shaOf(t, backupPath); got != SHA256Hex(oldContent) {
+		t.Fatalf("rollback source destroyed: backup sha %s", got)
+	}
+	if got := shaOf(t, cfg.AgentBinary); got != rel.sha {
+		t.Fatalf("binary changed during hold handling: %s", got)
+	}
+	if fs.restartCount() != 0 {
+		t.Fatalf("unclear mutation was re-run: %d restarts", fs.restartCount())
+	}
+	if api.callCount() != 0 {
+		t.Fatalf("must not claim another job while holding: %d claim calls", api.callCount())
+	}
+	if res := api.resultList(); len(res) != 0 {
+		t.Fatalf("no further result posts expected (outcome already reported): %v", res)
+	}
+	if _, err := os.Stat(stagingDir(cfg.StateDir, faultJobID)); err != nil {
+		t.Fatalf("staging must be retained as evidence: %v", err)
+	}
+}
+
+// TestPostSwapFailedRulingRetainsBackup: consumeWithRuling may treat a
+// "failed" ruling as cleanup-safe only when the journal proves nothing was
+// swapped. Post-swap it must retain backup + staging + journal and hold,
+// reporting rollback_unverified instead of tearing evidence down.
+func TestPostSwapFailedRulingRetainsBackup(t *testing.T) {
+	rel := newRelease(t, []byte("NEW-binary-ruling"), "https://example.com/agent")
+	cfg := testConfig(t, rel)
+	events := &eventLog{}
+	installSeams(t, events, rel.buildID)
+	oldContent := []byte("OLD-agent-binary")
+	store := heldPostSwapJob(t, cfg, rel, oldContent)
+	api := newFakeAPI(&ClaimedJob{JobID: faultJobID, Phase: "failed", FencingToken: 1}, events)
+	startHelperLoop(t, cfg, events)
+
+	j, err := store.Load()
+	if err != nil || j == nil {
+		t.Fatalf("load journal: %v / %v", j, err)
+	}
+	j.Hold = false
+	j.ReportedToServer = false // also exercise the hold report on the way down
+	if err := store.Save(j); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	d := NewDaemon(cfg, api)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := d.consumeWithRuling(ctx, j, "failed"); err != nil {
+		t.Fatalf("consumeWithRuling(failed): %v", err)
+	}
+
+	j2, err := store.Load()
+	if err != nil || j2 == nil {
+		t.Fatalf("journal must be retained: %v / %v", j2, err)
+	}
+	if !j2.Hold || j2.Phase != PhaseTerminal || j2.Outcome != "rollback_unverified" {
+		t.Fatalf("want held terminal rollback_unverified, got hold=%v phase=%s outcome=%s",
+			j2.Hold, j2.Phase, j2.Outcome)
+	}
+	backupPath := filepath.Join(backupDir(cfg.StateDir, faultJobID), "agent-binary")
+	if got := shaOf(t, backupPath); got != SHA256Hex(oldContent) {
+		t.Fatalf("backup deleted on unclear post-swap failure: sha %s", got)
+	}
+	if _, err := os.Stat(stagingDir(cfg.StateDir, faultJobID)); err != nil {
+		t.Fatalf("staging must be retained: %v", err)
+	}
+	if got := api.resultList(); len(got) != 1 || got[0] != "rollback_unverified|" {
+		t.Fatalf("hold must be reported as rollback_unverified, got %v", got)
+	}
+}
+
+// TestConsumeRemovesRetainedPendingAndResults: consumption must first stop
+// the path-unit triggers for the job — a retained apply/rollback request
+// would let the helper re-run the helper against a job the server already
+// ruled on — then finish tearing down local state idempotently.
+func TestConsumeRemovesRetainedPendingAndResults(t *testing.T) {
+	rel := newRelease(t, []byte("NEW-binary-consume"), "https://example.com/agent")
+	cfg := testConfig(t, rel)
+	events := &eventLog{}
+	installSeams(t, events, rel.buildID)
+	oldContent := []byte("OLD-agent-binary")
+	store := heldPostSwapJob(t, cfg, rel, oldContent)
+
+	j, err := store.Load()
+	if err != nil || j == nil {
+		t.Fatalf("load journal: %v / %v", j, err)
+	}
+	// Crash-after-cleanup state: the privileged cleanup already ran, so the
+	// direct teardown below needs no helper and stays deterministic.
+	j.CleanupDone = true
+	j.Hold = false
+	if err := store.Save(j); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	d := NewDaemon(cfg, newFakeAPI(nil, events))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := d.consume(ctx, j); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	for _, p := range []string{
+		pendingPath(cfg.StateDir, actionApply, faultJobID),
+		pendingPath(cfg.StateDir, actionRollback, faultJobID),
+		pendingPath(cfg.StateDir, actionCleanup, faultJobID),
+		resultPath(cfg.StateDir, actionApply, faultJobID),
+		resultPath(cfg.StateDir, actionCleanup, faultJobID),
+	} {
+		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s must be removed by consume: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(stagingDir(cfg.StateDir, faultJobID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging must be removed: %v", err)
+	}
+	if names, err := PendingActions(cfg.StateDir); err != nil || len(names) != 0 {
+		t.Fatalf("no path-unit trigger may survive consumption: %v / %v", names, err)
+	}
+	if j2, err := store.Load(); err != nil || j2 != nil {
+		t.Fatalf("journal must be cleared: %v / %v", j2, err)
+	}
+}
+
+// TestRuledCleanupRemovesHelperJournal: after a server-ruled terminal
+// outcome the backup is deleted — the root helper journal for that job must
+// go with it, or a stale journal would drive reconciliation of a consumed
+// job (restarting services from records that no longer exist).
+func TestRuledCleanupRemovesHelperJournal(t *testing.T) {
+	rel := newRelease(t, []byte("NEW-binary-ruled"), "https://example.com/agent")
+	cfg := testConfig(t, rel)
+	events := &eventLog{}
+	installSeams(t, events, rel.buildID)
+	oldContent := []byte("OLD-agent-binary")
+	store := heldPostSwapJob(t, cfg, rel, oldContent)
+	api := newFakeAPI(&ClaimedJob{JobID: faultJobID, Phase: "succeeded", FencingToken: 1}, events)
+	startHelperLoop(t, cfg, events)
+	// Let the path unit finish the seeded (retained) apply request first, so
+	// no in-flight helper run can re-write a result after consumption —
+	// mirrors production, where the helper run that triggered the ruling has
+	// long completed before the terminal ruling arrives.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		names, _ := PendingActions(cfg.StateDir)
+		_, rerr := ReadResult(cfg.StateDir, actionApply, faultJobID)
+		if len(names) == 0 && rerr == nil {
+			break // request drained and the helper's result is on disk
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("helper never finished the seeded request: pending=%v resultErr=%v", names, rerr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	j, err := store.Load()
+	if err != nil || j == nil {
+		t.Fatalf("load journal: %v / %v", j, err)
+	}
+	// Reported succeeded, awaiting the ruling — not on hold.
+	j.Hold = false
+	j.Outcome = "succeeded"
+	if err := store.Save(j); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	d := NewDaemon(cfg, api)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := d.runJob(ctx, j); err != nil {
+		t.Fatalf("runJob: %v", err)
+	}
+
+	if j2, err := store.Load(); err != nil || j2 != nil {
+		t.Fatalf("journal must be consumed: %v / %v", j2, err)
+	}
+	if hj, err := LoadHelperJournal(cfg.StateDir); err != nil || hj != nil {
+		t.Fatalf("helper journal must be removed with its backup: %v / %v", hj, err)
+	}
+	backupPath := filepath.Join(backupDir(cfg.StateDir, faultJobID), "agent-binary")
+	if _, err := os.Stat(backupPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup must be cleaned after succeeded ruling: %v", err)
+	}
+	if _, err := os.Stat(stagingDir(cfg.StateDir, faultJobID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging must be cleaned: %v", err)
+	}
+	if names, err := PendingActions(cfg.StateDir); err != nil || len(names) != 0 {
+		t.Fatalf("no path-unit trigger may survive consumption: %v / %v", names, err)
+	}
+	if res, err := ReadResult(cfg.StateDir, actionApply, faultJobID); err != nil || res != nil {
+		t.Fatalf("helper results must be cleaned: %v / %v", res, err)
+	}
+}
+
+// TestHelperRefusesSymlinkedStateDirs: stateDir is group-writable by the
+// updater user, so between two helper runs that user can plant a symlink at
+// results/ or helper/. The privileged helper must fail closed on it —
+// nothing written through the link, no request drained.
+func TestHelperRefusesSymlinkedStateDirs(t *testing.T) {
+	rel := newRelease(t, []byte("symlink-boundary"), "https://example.com/agent")
+
+	t.Run("results", func(t *testing.T) {
+		cfg := testConfig(t, rel)
+		target := t.TempDir()
+		if err := os.Symlink(target, resultsDir(cfg.StateDir)); err != nil {
+			t.Skipf("symlink not permitted in this environment: %v", err)
+		}
+		writePending(t, cfg, actionApply, faultJobID)
+		err := RunHelper(context.Background(), cfg)
+		if err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("RunHelper must refuse the planted results symlink, got %v", err)
+		}
+		entries, rerr := os.ReadDir(target)
+		if rerr != nil {
+			t.Fatalf("read symlink target: %v", rerr)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("helper wrote through the results symlink: %v", entries)
+		}
+		if _, serr := os.Stat(pendingPath(cfg.StateDir, actionApply, faultJobID)); serr != nil {
+			t.Fatalf("request must stay untouched: %v", serr)
+		}
+	})
+
+	t.Run("helper", func(t *testing.T) {
+		cfg := testConfig(t, rel)
+		target := t.TempDir()
+		if err := os.Symlink(target, helperRoot(cfg.StateDir)); err != nil {
+			t.Skipf("symlink not permitted in this environment: %v", err)
+		}
+		writePending(t, cfg, actionApply, faultJobID)
+		err := RunHelper(context.Background(), cfg)
+		if err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("RunHelper must refuse the planted helper symlink, got %v", err)
+		}
+		entries, rerr := os.ReadDir(target)
+		if rerr != nil {
+			t.Fatalf("read symlink target: %v", rerr)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("helper created state through the helper symlink: %v", entries)
+		}
+		if _, serr := os.Stat(pendingPath(cfg.StateDir, actionApply, faultJobID)); serr != nil {
+			t.Fatalf("request must stay untouched: %v", serr)
+		}
+	})
+
+	// Runs everywhere (symlinks above may be unprivileged): the helper root
+	// replaced by a plain file must also fail the helper closed before any
+	// request is drained or any state is written.
+	t.Run("helper-replaced-by-file", func(t *testing.T) {
+		cfg := testConfig(t, rel)
+		if err := os.WriteFile(helperRoot(cfg.StateDir), []byte("not a dir"), 0o644); err != nil {
+			t.Fatalf("plant file: %v", err)
+		}
+		writePending(t, cfg, actionApply, faultJobID)
+		err := RunHelper(context.Background(), cfg)
+		if err == nil || !strings.Contains(err.Error(), "not a directory") {
+			t.Fatalf("RunHelper must refuse a non-directory helper root, got %v", err)
+		}
+		if _, serr := os.Stat(pendingPath(cfg.StateDir, actionApply, faultJobID)); serr != nil {
+			t.Fatalf("request must stay untouched: %v", serr)
+		}
+		if _, serr := os.Stat(resultPath(cfg.StateDir, actionApply, faultJobID)); !errors.Is(serr, os.ErrNotExist) {
+			t.Fatalf("no result may be written on a refused boundary: %v", serr)
+		}
+	})
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import { DashboardSessionGuard } from "../auth/dashboard-session.guard.js";
 import { OriginGuard } from "../auth/origin-guard.js";
@@ -8,7 +8,10 @@ import { DockerManagementService } from "./docker-management.service.js";
 @Controller("api/vps/:id/docker/management")
 @UseGuards(DashboardSessionGuard, OriginGuard)
 export class DockerManagementController {
-  constructor(private readonly service: DockerManagementService) {}
+  constructor(
+    @Inject(DockerManagementService)
+    private readonly service: DockerManagementService,
+  ) {}
   @Get("capability") capability(@Param("id") id: string) { return this.service.capability(id); }
   @Post("actions") create(@Param("id") id: string, @Body() body: unknown) {
     try { const input = dockerManagementCreateSchema.parse(body); return this.service.create(id, { ...input, confirmedAt: new Date().toISOString() }); }

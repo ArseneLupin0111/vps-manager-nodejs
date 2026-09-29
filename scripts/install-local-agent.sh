@@ -416,6 +416,8 @@ if [[ -x /usr/local/lib/vps-manager-agent/vps-updater ]]; then
   echo "  Status: sudo /usr/local/lib/vps-manager-agent/vps-updater status -config /etc/vps-updater/config.json"
 else
   echo "Updater:  not installed — agent upgrades stay manual (plan §4/§5)."
-  echo "  Bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> --sha256 <hex-from-signed-manifest>"
+  echo "  Bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> \\"
+  echo "             --manifest <manifest.json> --pubkey-file <pinned-release-pub.b64>"
+  echo "             (--sha256 <entry-sha256> optional extra pin; must equal the signed entry, never trusted alone)"
 fi
-echo "Runbook:  docs/local-agent-upgrade-plan.md (offline recovery, rollback hold/ack)"
+echo "Runbook:  docs/local-agent-upgrade-operations.md (offline recovery, rollback hold/ack)"

@@ -163,6 +163,9 @@ jobs:
             --in /tmp/manifest.unsigned.json \
             --out manifest.json \
             --print-pubkey > /tmp/manifest.pubkey.b64
+          # Public verification key is intentionally publishable; the private
+          # signing key remains confined to the protected environment.
+          cp /tmp/manifest.pubkey.b64 release-pubkey.b64
 
       - name: Verify signature and tamper gate before publishing
         run: |
@@ -191,6 +194,7 @@ jobs:
           else
             gh release create "$TAG" \
               manifest.json \
+              release-pubkey.b64 \
               packages/agent/dist/vps-agent-linux-amd64 \
               packages/agent/dist/vps-updater-linux-amd64 \
               --title "local agent ${{ steps.identity.outputs.identity }}" \
@@ -202,7 +206,8 @@ jobs:
               sha256: ${{ steps.artifact.outputs.sha256 }}
               artifact: vps-updater-linux-amd64 (linux/amd64, component updater)
               sha256: ${{ steps.artifact.outputs.updater_sha256 }}
-              Signature: Ed25519 over canonical JSON (see manifest.json)."
+              Signature: Ed25519 over canonical JSON (see manifest.json).
+              Verification key: release-pubkey.b64 (raw Ed25519 public key, base64)."
           fi
 
       - name: Update stable channel pointer
@@ -235,6 +240,10 @@ jobs:
           test "$(jq -r .releaseId /tmp/pointer.json)" = "$GITHUB_SHA"
           MURL="$(jq -r .manifestUrl /tmp/pointer.json)"
           curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors "$MURL" -o /tmp/published-manifest.json
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            "$BASE/releases/download/agent-$GITHUB_SHA/release-pubkey.b64" \
+            -o /tmp/published-pubkey.b64
+          cmp /tmp/manifest.pubkey.b64 /tmp/published-pubkey.b64
           node scripts/release/verify-manifest.mjs \
             --manifest /tmp/published-manifest.json \
             --pubkey "$PUBKEY" \

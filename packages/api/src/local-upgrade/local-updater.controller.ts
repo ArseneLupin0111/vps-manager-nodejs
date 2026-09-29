@@ -18,7 +18,38 @@ import {
   localUpdaterProgressSchema,
   localUpdaterResultSchema,
 } from "./local-upgrade.schemas.js";
-import { isLocalHostVps, LocalUpgradeService } from "./local-upgrade.service.js";
+import {
+  isLocalHostVps,
+  LocalUpgradeService,
+} from "./local-upgrade.service.js";
+import type { LocalUpgradeJob } from "./local-upgrade.models.js";
+
+function updaterJob(job: LocalUpgradeJob, requiresReconcile = false) {
+  return {
+    jobId: job.id,
+    phase: job.state,
+    state: job.state,
+    fencingToken: job.fencingToken,
+    manifestRaw: job.manifestRaw,
+    claimedAt: job.claimedAt,
+    baselineBuildId: job.baselineBuildId,
+    requiresReconcile,
+    leaseExpiresAt: job.leaseExpiresAt,
+    phaseDeadlineAt: job.phaseDeadlineAt,
+    deadlineAt: job.deadlineAt,
+    baselineHeartbeatAt: job.baselineHeartbeatAt,
+    progress: job.progress,
+    error: job.error?.message ?? null,
+    result: job.result,
+    completedAt: job.completedAt,
+    release: {
+      releaseId: job.releaseId,
+      version: job.releaseVersion,
+      buildId: job.releaseBuildId,
+      targetSha256: job.targetSha256,
+    },
+  };
+}
 
 /**
  * Pull-only updater API. Authenticated by a dedicated bearer credential
@@ -43,7 +74,7 @@ export class LocalUpdaterController {
     if (!claim) return { data: { job: null } };
     return {
       data: {
-        job: claim.job,
+        job: updaterJob(claim.job, claim.requiresReconcile),
         requiresReconcile: claim.requiresReconcile,
       },
     };
@@ -59,7 +90,7 @@ export class LocalUpdaterController {
     const credential = await this.authenticate(req);
     const input = localUpdaterProgressSchema.parse(body);
     const job = await this.service.progress(credential, jobId, input);
-    return { data: { job } };
+    return { data: { job: updaterJob(job) } };
   }
 
   @Post("jobs/:jobId/result")
@@ -74,7 +105,7 @@ export class LocalUpdaterController {
     const outcome = await this.service.result(credential, jobId, input);
     return {
       data: {
-        job: outcome.job,
+        job: updaterJob(outcome.job),
         ...(outcome.awaitHeartbeat ? { awaitHeartbeat: true as const } : {}),
       },
     };
@@ -83,7 +114,11 @@ export class LocalUpdaterController {
   @Get("jobs/:jobId")
   async getJob(@Req() req: Request, @Param("jobId") jobId: string) {
     const credential = await this.authenticate(req);
-    return { data: { job: await this.service.getUpdaterJob(credential, jobId) } };
+    return {
+      data: {
+        job: updaterJob(await this.service.getUpdaterJob(credential, jobId)),
+      },
+    };
   }
 
   private async authenticate(req: Request): Promise<AgentCredential> {

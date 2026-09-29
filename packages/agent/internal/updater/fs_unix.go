@@ -47,3 +47,13 @@ func (l *lockFile) release() {
 	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
 	_ = l.f.Close()
 }
+
+// statIsRootOwned reports whether fi describes a uid-0 file; ok=false when
+// the platform exposes no uid metadata (caller skips the ownership check).
+func statIsRootOwned(fi os.FileInfo) (bool, bool) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, false
+	}
+	return st.Uid == 0, true
+}

@@ -198,6 +198,38 @@ describe("LocalAgentSupervisorService", () => {
     service.stopCollection();
   });
 
+  it("does not overwrite a real local agent heartbeat during fallback collection or shutdown", async () => {
+    const repos = await createTempRepositories(tempDir);
+    const service = new LocalAgentSupervisorService(localConfig, repos.vps, repos.metrics, repos.agent);
+    await service.onApplicationBootstrap();
+    service.stopCollection();
+
+    const buildId = "c1fcfce6813696796f99c18a9361e8d43808ff26";
+    const lastSeenAt = new Date().toISOString();
+    await repos.agent.upsertState({
+      vpsId: "vps_local_host",
+      status: "online",
+      version: `0.1.0+${buildId}`,
+      buildId,
+      lastSeenAt,
+    });
+
+    await service.collectOnce();
+    expect(await repos.agent.getState("vps_local_host")).toMatchObject({
+      version: `0.1.0+${buildId}`,
+      buildId,
+      lastSeenAt,
+      status: "online",
+    });
+    await service.onApplicationShutdown();
+    expect(await repos.agent.getState("vps_local_host")).toMatchObject({
+      version: `0.1.0+${buildId}`,
+      buildId,
+      lastSeenAt,
+      status: "online",
+    });
+  });
+
   it("collectOnce captures window samples", async () => {
     const repos = await createTempRepositories(tempDir);
     const service = new LocalAgentSupervisorService(

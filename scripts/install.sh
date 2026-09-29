@@ -586,5 +586,7 @@ echo ""
 # Runbook pointer (plan §5): the app never silently upgrades the local
 # agent or the updater; both stay operator-driven.
 echo "Local agent/updater upgrades are NEVER automatic (plan §5)."
-echo "  Manual updater bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> --sha256 <hex-from-signed-manifest>"
-echo "  Offline runbook:          docs/local-agent-upgrade-plan.md"
+echo "  Manual updater bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> \\"
+echo "                            --manifest <manifest.json> --pubkey-file <pinned-release-pub.b64>"
+echo "                            (--sha256 <entry-sha256> optional extra pin; must equal the signed entry, never trusted alone)"
+echo "  Offline runbook:          docs/local-agent-upgrade-operations.md"

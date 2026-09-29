@@ -569,6 +569,24 @@ export class LocalUpgradeService {
         },
       );
       if (updated) {
+        // Auditable claim: which credential took (or reclaimed) the lease —
+        // identifiers only, never the bearer token or its hash. Lease-valid
+        // replay polls above return without mutating, so they never audit.
+        await this.audit.record({
+          actor: "system",
+          action: "local_agent_upgrade.claim",
+          resourceType: "vps",
+          resourceId: credential.vpsId,
+          jobId: job.id,
+          result: "success",
+          metadata: {
+            releaseId: job.releaseId,
+            credentialId: credential.id,
+            fencingToken: updated.fencingToken,
+            reclaimCount: updated.reclaimCount,
+            phase: updated.state,
+          },
+        });
         return { job: updated, requiresReconcile: isPostSwapState(updated.state) };
       }
     }
@@ -649,6 +667,24 @@ export class LocalUpgradeService {
           const current = await this.repository.get(job.id);
           if (current) return { job: current };
         }
+
+        // Idempotent result replay: an identical verdict under the fencing
+        // token that won the terminal ruling reads back the committed job —
+        // a retried POST (lost response) converges instead of erroring. A
+        // `failed` report also replays a ruling the API settled as
+        // rollback_unverified (its policy answer to the same post-swap
+        // report). A replay never mutates: it returns the committed ruling
+        // unchanged, so a stale claimant (token mismatch) or a conflicting
+        // verdict still gets job_terminal.
+        if (
+          input.fencingToken === job.fencingToken &&
+          job.result != null &&
+          (job.result.outcome === input.outcome ||
+            (input.outcome === "failed" &&
+              job.result.outcome === "rollback_unverified"))
+        ) {
+          return { job };
+        }
         throw this.jobTerminalConflict();
       }
 
@@ -656,29 +692,63 @@ export class LocalUpgradeService {
       const nowIso = new Date(nowMs).toISOString();
 
       if (input.outcome === "failed") {
-        const updated = await this.commitTerminal(
-          job,
-          {
-            state: "failed",
-            completedAt: nowIso,
-            error: {
-              code: "update_failed",
-              message: input.reason ?? "Updater reported a failed upgrade",
-            },
-            result: {
-              outcome: "failed",
-              ...(input.reportedBuildId
-                ? { reportedBuildId: input.reportedBuildId }
-                : {}),
+        // `failed` is only truthful before the binary swap: the updater is
+        // reporting that nothing was mutated. At or after the swap the API
+        // can never accept failed as proof that cleanup is safe — the host
+        // may hold a half-applied binary — so the job settles
+        // rollback_unverified instead: backup and journal retained, operator
+        // verification required (the same ruling deadline timeouts give
+        // post-swap). The response stays 200 with the settled job; the
+        // updater only maps stale_lease/job_terminal error codes.
+        const postSwap = isPostSwapState(job.state);
+        const patch: LocalUpgradeWritePatch = postSwap
+          ? {
+              state: "rollback_unverified",
               completedAt: nowIso,
-            },
-          },
-          {
-            action: "local_agent_upgrade.failure",
-            result: "failure",
-            metadata: { reason: input.reason ?? "update_failed" },
-          },
-        );
+              error: {
+                code: "post_swap_failed",
+                message: input.reason
+                  ? `Upgrade failed at or after the binary swap: ${input.reason}`
+                  : "Upgrade failed at or after the binary swap; verify the host before cleanup",
+              },
+              result: {
+                outcome: "rollback_unverified",
+                ...(input.reportedBuildId
+                  ? { reportedBuildId: input.reportedBuildId }
+                  : {}),
+                completedAt: nowIso,
+              },
+            }
+          : {
+              state: "failed",
+              completedAt: nowIso,
+              error: {
+                code: "update_failed",
+                message: input.reason ?? "Updater reported a failed upgrade",
+              },
+              result: {
+                outcome: "failed",
+                ...(input.reportedBuildId
+                  ? { reportedBuildId: input.reportedBuildId }
+                  : {}),
+                completedAt: nowIso,
+              },
+            };
+        const audit = postSwap
+          ? {
+              action: "local_agent_upgrade.rollback",
+              result: "failure" as const,
+              metadata: {
+                reason: input.reason ?? "post_swap_failed",
+                reportedOutcome: "failed",
+              },
+            }
+          : {
+              action: "local_agent_upgrade.failure",
+              result: "failure" as const,
+              metadata: { reason: input.reason ?? "update_failed" },
+            };
+        const updated = await this.commitTerminal(job, patch, audit);
         if (updated) return { job: updated };
         continue;
       }
