@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — CI/CD optimization
+
+- Scope PR checks through a lightweight change-detection job; keep the full verification matrix on main and honor manual force-build inputs.
+- Run database integrations alongside verification, generate SBOMs only for publishable main runs, and avoid redundant standalone Node/Go builds.
+- Transfer checksummed, verified Docker images to publish without rebuilding; verify loaded image identities and deploy the pushed digest references.
+- Fix fail-fast migration asset smoke checks and grant change detection the pull-request read permission it requires.
+
 ## Unreleased — local agent upgrade
 
 - Add signed, immutable agent/updater release manifests with pinned Ed25519 verification, a stable-channel catalog, build IDs, and compatibility checks.

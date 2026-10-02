@@ -8,38 +8,38 @@ Workflow file: `.github/workflows/ci.yml`
 
 ### Pull requests
 
-Pull requests run conditional verification: image build, image scan, and SBOM steps run only when the corresponding API or web paths change (or a workflow dispatch force input is selected). Pull requests do not publish images to GHCR and do not run the production deploy job.
+Pull requests run conditional verification behind a lightweight `changes` job (path filters, no toolchains installed): Node, Go, installer, updater, database, and image steps run only when their paths change, so a docs-only PR skips almost everything. Pushes to `main` force the full check matrix and both image builds. Pull requests do not publish images to GHCR and do not run the production deploy job.
 
-Every pull request runs:
+Image filters intentionally include both Node workspaces: the current Dockerfile builds both in its shared build stage, so a web-only change still rebuilds both runtime images. Database integrations skip web-only changes; docs-only changes skip Node, Go, image, installer/updater, and database checks. Workflow and hardening-fixture changes re-run the affected safety checks.
 
-1. `npm ci`
-2. `npm test`
-3. `npm run typecheck`
-4. `npm run build`
-5. `bash scripts/tests/test-installer-docker-access.sh`
-6. `docker compose config --quiet`
-7. When agent paths change, the Go agent is tested with the race detector (`CGO_ENABLED=1`); otherwise the agent test/build step is skipped.
-8. Docker build checks for both runtime targets:
-   - API image target: `api-runtime`
-   - Web image target: `web-runtime`
-9. When an API or web image is built, independent report-only Trivy scans and SBOM generation run for both applicable images; reports are uploaded even if findings occur, then a final gate fails on fixable CRITICAL findings.
-10. TimescaleDB PostgreSQL migration integration (`postgres-integration`, `timescale/timescaledb:2.17.2-pg16`)
-11. Mandatory plain PostgreSQL 16 job (`docker-monitoring-postgres16`, `postgres:16`, `pg_isready` healthcheck, and `VPS_MANAGER_TEST_POSTGRES_URL`), separate from TimescaleDB; it runs the concrete migration, repository, and maintenance suites (`docker-migration-009/013/014.postgres.test.ts`, `docker-monitoring-repository.postgres.test.ts`, and `docker-monitoring-maintenance.postgres.test.ts`). `publish` requires both database jobs.
+Every pull request runs change detection, then only the matching checks:
+
+1. When Node paths change: `npm ci`, `npm test`, `npm run typecheck`, and the `--help` script smoke tests. `npm run build` runs only as a fallback when no Docker target builds (both image targets run the same build inside Docker).
+2. When installer paths change: `bash scripts/tests/test-installer-docker-access.sh`.
+3. When updater (or agent) paths change: pinned `Setup Go`, then `bash scripts/tests/test-updater.sh`.
+4. `docker compose config --quiet` (always, cheap sanity gate).
+5. When agent paths change: Go agent tested with the race detector plus `go vet` (the standalone `go build` was redundant — the API image build and the identity parity check both compile the agent).
+6. When API/web paths change (or a workflow-dispatch force input selects them): Docker build checks for the affected runtime targets (`api-runtime`, `web-runtime`) with OCI labels.
+7. When an API or web image is built: fail-fast smoke tests, the Docker-socket metadata guard, independent report-only Trivy scans, and the fail-closed CRITICAL gate. SBOM generation is main-only (SBOMs are release attestations; PRs are still scanned and gated).
+8. When database paths change: TimescaleDB PostgreSQL migration integration (`postgres-integration`, `timescale/timescaledb:2.17.2-pg16`) runs concurrently with `verify` (no longer gated on it).
+9. When database paths change: mandatory plain PostgreSQL 16 job (`docker-monitoring-postgres16`, `postgres:16`, `pg_isready` healthcheck, and `VPS_MANAGER_TEST_POSTGRES_URL`), separate from TimescaleDB; it runs the concrete migration, repository, and maintenance suites (`docker-migration-009/013/014.postgres.test.ts`, `docker-monitoring-repository.postgres.test.ts`, and `docker-monitoring-maintenance.postgres.test.ts`). `publish` requires both database jobs.
 
 The PostgreSQL jobs run the same live-test contract against different server capabilities. Core migrations and Docker-monitoring tables must work on ordinary PostgreSQL; TimescaleDB is exercised separately for optional extension-aware deployments. Tests that require a live database are skipped when `VPS_MANAGER_TEST_POSTGRES_URL` is unset, but CI supplies it and therefore treats those cases as mandatory.
 
-The `publish` job runs only on pushes to `main` (and equivalent non-PR workflow dispatches). It always builds and publishes both API and web images using the current commit SHA, regardless of verification path filters. Pull requests never publish images or deploy.
+The `publish` job runs only on pushes to `main` (and equivalent non-PR workflow dispatches). It publishes the exact images built, scanned, and gated in `verify` — transferred as a checksummed `docker save` artifact with image-ID equality verification, never rebuilt. Pull requests never publish images or deploy.
 
 ### Pushes to `main`
 
-Pushes to `main` run the same verification steps, then publish two Docker images to GHCR with the current commit SHA only (no `latest` tag for deployment):
+Pushes to `main` force the full verification matrix (`full` scope: all checks and both image builds run regardless of path filters), then publish two Docker images to GHCR with the current commit SHA only (no `latest` tag for deployment):
 
 - API:
   - `ghcr.io/sondoan17/vps-manager-nodejs-api:<commit-sha>`
 - Web:
   - `ghcr.io/sondoan17/vps-manager-nodejs-web:<commit-sha>`
 
-Deploy uses exactly the image references from the publish outputs. Rollback is reproducible by redeploying the image for an earlier commit SHA.
+Transfer flow: `verify` saves both loaded images into one `docker save` archive (`verified-images-<sha>`, checksum + image-ID manifest, 1-day retention), and `publish` downloads it, verifies the checksum, loads it, asserts the image IDs match the scanned/saved images, then tags and pushes the SHA tags — build once, publish without rebuild. `publish` fails closed via an explicit `always()` needs check: every gate (`verify`, both database jobs) must report `success`. Because `main` forces all jobs to run, a skipped gate can never slip through.
+
+Deploy pulls by immutable digest (`name@sha256:...` references recorded from `RepoDigests` after the push), not by SHA tag. Rollback stays reproducible by redeploying the image for an earlier commit SHA.
 
 After publishing, the workflow can deploy over SSH if deployment secrets are configured.
 
@@ -150,4 +150,4 @@ The database password is stored in the server-side `.env` file for this single-h
 
 ## Manual run
 
-The workflow supports `workflow_dispatch`, so it can be run manually from the GitHub Actions tab.
+The workflow supports `workflow_dispatch`, so it can be run manually from the GitHub Actions tab. The `force_api_build` / `force_web_build` inputs only ever add an image build — leaving them unchecked (`false`) never forces anything; on a manual run from `main` the full matrix runs regardless of the force inputs.
