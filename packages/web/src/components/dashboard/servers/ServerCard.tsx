@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
+  AlertTriangle,
   Clock3,
   DownloadCloud,
   Edit3,
@@ -112,7 +113,30 @@ export function ServerCard({
     systemInfo?.os?.name ||
     systemInfo?.os?.family ||
     "OS not reported";
+  const specsLabel = systemInfo
+    ? [
+        systemInfo.cpu?.cores ? `${systemInfo.cpu.cores} cores` : null,
+        systemInfo.memory?.totalBytes
+          ? `${formatBytes(systemInfo.memory.totalBytes)} RAM`
+          : null,
+        systemInfo.rootDisk?.totalBytes
+          ? `${formatBytes(systemInfo.rootDisk.totalBytes)} disk`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
   const agentJob = agentJobFor(vps, jobs);
+  const systemFacts = systemInfo
+    ? [
+        [systemInfo.kernel?.release, systemInfo.kernel?.arch]
+          .filter(Boolean)
+          .join(" · ") || null,
+        systemInfo.cpu?.model || null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
   const agentActionRunning = Boolean(
     agentJob && (agentJob.status === "queued" || agentJob.status === "running"),
   );
@@ -142,48 +166,72 @@ export function ServerCard({
   return (
     <article
       aria-label={`Server ${displayName}`}
-      className={`min-w-0 overflow-hidden rounded-none border bg-white/[0.03] shadow-none transition duration-300 ${isDown ? "border-white/20 ring-1 ring-white/10" : "border-white/10 hover:border-white/20"}`}
+      className={`min-w-0 overflow-hidden border bg-panel transition-colors ${isDown ? "border-crit/30" : "border-line hover:border-dim/60"}`}
     >
-      <header className="min-w-0 border-b border-white/10 bg-gradient-to-r from-white/[0.035] to-transparent px-3 py-4 sm:px-4 sm:py-5">
-        <div className="flex min-w-0 items-start justify-between gap-3 sm:gap-5">
-          <h3 className="min-w-0 break-words text-xl font-semibold leading-tight tracking-[-0.02em] text-white sm:text-2xl">
-            {displayName}
-          </h3>
-          <ServerHealthStatus status={vps.status} />
+      <div className="grid min-w-0 gap-5 p-5">
+        {/* Identity: name → status → endpoint → os/location → specs */}
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h3 className="min-w-0 break-words text-lg font-semibold leading-tight tracking-[-0.02em] text-text">
+              {displayName}
+            </h3>
+            <ServerHealthStatus status={vps.status} />
+          </div>
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-[13px] leading-5 text-dim">
+            <span
+              className="tnum inline-block min-w-[12rem] font-mono"
+              aria-label={addressHidden ? "Server address hidden" : `Server address ${vps.host}:${vps.port}`}
+            >
+              {addressHidden ? "••••••••••••:••••" : `${vps.host}:${vps.port}`}
+            </span>
+            <button
+              type="button"
+              className="inline-grid h-7 w-7 shrink-0 place-items-center border border-line text-dim transition-colors hover:bg-raised hover:text-text focus-visible:outline-2 focus-visible:outline-signal"
+              aria-label={addressHidden ? "Show server address" : "Hide server address"}
+              aria-pressed={addressHidden}
+              title={addressHidden ? "Show server address" : "Hide server address"}
+              onClick={() => setAddressHidden((hidden) => !hidden)}
+            >
+              {addressHidden ? <Eye size={14} aria-hidden="true" /> : <EyeOff size={14} aria-hidden="true" />}
+            </button>
+          </div>
+          <p className="mt-1 truncate text-[12px] text-dim" title={osLabel}>
+            {osLabel}
+          </p>
+          <p className="mt-0.5 text-[12px] text-dim">
+            {specsLabel ?? "System info not reported yet."}
+          </p>
+          {systemFacts ? (
+            <p className="mt-0.5 truncate text-[11px] text-dim" title={systemFacts}>
+              {systemFacts}
+            </p>
+          ) : null}
+          {hostId ? (
+            <p className="mt-1 break-all font-mono text-[11px] text-dim">
+              Host ID: {hostId}
+            </p>
+          ) : null}
+          <ServerLocationMeta vps={vps} />
+          <ServerAnnotations vps={vps} />
+          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-dim">
+            <Clock3 size={13} aria-hidden="true" />
+            <span>Seen {formatDate(vps.lastSeenAt)}</span>
+          </div>
         </div>
-        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-white/60 sm:text-sm">
-          <span
-            className="inline-block min-w-[12rem] font-mono text-white/75"
-            aria-label={addressHidden ? "Server address hidden" : `Server address ${vps.host}:${vps.port}`}
-          >
-            {addressHidden ? "••••••••••••:••••" : `${vps.host}:${vps.port}`}
-          </span>
-          <button
-            type="button"
-            className="inline-grid h-8 w-8 shrink-0 place-items-center border border-white/10 bg-white/[0.025] text-white/55 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
-            aria-label={addressHidden ? "Show server address" : "Hide server address"}
-            aria-pressed={addressHidden}
-            title={addressHidden ? "Show server address" : "Hide server address"}
-            onClick={() => setAddressHidden((hidden) => !hidden)}
-          >
-            {addressHidden ? <Eye size={14} aria-hidden="true" /> : <EyeOff size={14} aria-hidden="true" />}
-          </button>
-          <span className="text-white/25" aria-hidden="true">
-            ·
-          </span>
-          <span className="min-w-0 truncate">{osLabel}</span>
-        </div>
-        {hostId ? <p className="mt-1 break-all font-mono text-[10px] text-white/35">Host ID: {hostId}</p> : null}
-        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-white/40 sm:text-xs">
-          <Clock3 size={13} aria-hidden="true" />
-          <span>Seen {formatDate(vps.lastSeenAt)}</span>
-        </div>
-      </header>
 
-      <div className="grid min-w-0 divide-y divide-white/10 md:grid-cols-3 md:divide-x md:divide-y-0">
-        <ServerSystemInfoStrip vps={vps} systemInfo={systemInfo} />
-        <ServerMetricStrip metric={metric} />
-        <div className="min-w-0 p-3 sm:p-4">
+        {/* Meters: 4px tonal bars */}
+        <div className="grid min-w-0 gap-3">
+          <TelemetryMeter label="CPU" value={metric?.cpu} />
+          <TelemetryMeter label="RAM" value={metric?.memory} />
+          <TelemetryMeter label="Disk" value={metric?.disk} />
+          <div className="flex items-baseline justify-between gap-3 text-[12px]">
+            <span className="text-dim">Load</span>
+            <span className="tnum text-dim">{metric ? metric.loadAverage : "n/a"}</span>
+          </div>
+        </div>
+
+        {/* Docker box */}
+        <div className="min-w-0 border border-line bg-ink/40">
           <DockerMetricsPanel
             vps={vps}
             dockerMetrics={dockerMetrics}
@@ -191,10 +239,9 @@ export function ServerCard({
             onToggle={onToggleDockerMetrics}
           />
         </div>
-      </div>
 
-      <footer className="border-t border-white/10 px-3 py-3 sm:px-4">
-        <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        {/* Actions footer */}
+        <div className="flex min-w-0 flex-col gap-3 border-t border-line pt-4 xl:flex-row xl:items-center xl:justify-between">
           <ServerRuntimeMeta
             vps={vps}
             metric={metric}
@@ -212,7 +259,7 @@ export function ServerCard({
             </Link>
           </Button>
           {isLocalHost ? (
-            <span className="inline-flex h-9 items-center gap-2 px-2 text-sm text-white/50">
+            <span className="inline-flex h-9 items-center gap-2 px-2 text-sm text-dim">
               <Activity size={16} aria-hidden="true" />
               Managed locally
             </span>
@@ -287,12 +334,20 @@ export function ServerCard({
           />
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-x-5 gap-y-1 text-xs xl:order-first xl:grid-cols-1">
-            <div className="flex items-center gap-2"><span className="text-white/40">Agent</span><AgentLifecycleStatus vps={vps} jobs={jobs} compact /></div>
-            <div className="flex items-center gap-2"><span className="text-white/40">Access</span><span className={isReady ? "text-emerald-300" : "text-amber-300"}>{isLocalHost ? "Local" : isReady ? "Key ready" : "Needs password"}</span></div>
+            <div className="flex items-center gap-2"><span className="text-dim">Agent</span><AgentLifecycleStatus vps={vps} jobs={jobs} compact /></div>
+            <div className="flex items-center gap-2"><span className="text-dim">Access</span><span className={isReady ? "text-signal" : "text-warn"}>{isLocalHost ? "Local" : isReady ? "Key ready" : "Needs password"}</span></div>
             {isLocalHost ? <LocalAgentUpdate vps={vps} variant="card" /> : null}
           </div>
         </div>
-      </footer>
+      </div>
+      {isDown ? (
+        <div className="flex items-center gap-2 border-t border-crit/30 bg-crit/5 px-5 py-2 text-[12px] text-crit">
+          <AlertTriangle size={14} aria-hidden="true" />
+          <span className="min-w-0">
+            No heartbeat since {formatDate(vps.lastSeenAt)} ({freshnessLabel(metric?.collectedAt ?? vps.lastSeenAt)}). Check power, firewall and SSH key.
+          </span>
+        </div>
+      ) : null}
       {/* Delete confirmation – rendered outside DropdownMenu to avoid focus-trap nesting */}
       <AlertDialog
         open={deleteTarget?.id === vps.id}
@@ -368,7 +423,7 @@ export function ServerCard({
         <form
           onSubmit={(event) => event.preventDefault()}
           autoComplete="off"
-          className="grid gap-2 border-t border-white/10 bg-white/[0.02] px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-4"
+          className="grid gap-2 border-t border-line bg-ink/40 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto]"
         >
           <Label>
             {isReady ? "One-time password for rotation" : "One-time password"}
@@ -385,7 +440,7 @@ export function ServerCard({
               onKeyDown={handlePasswordKeyDown}
             />
             {passwordError ? (
-              <p className="mt-1 text-xs font-normal text-white/50">
+              <p className="mt-1 text-xs font-normal text-crit">
                 {passwordError}
               </p>
             ) : null}
@@ -434,23 +489,22 @@ export function ServerCard({
 function ServerHealthStatus({ status }: { status?: VpsRecord["status"] }) {
   const isDown = status === "unreachable";
   const label = serverStatusLabel(status);
-  const dotColor =
+  const tone =
     status === "healthy"
-      ? "bg-emerald-400"
+      ? "border-signal/40 bg-signal/10 text-signal"
       : status === "warning"
-        ? "bg-amber-400"
-        : status === "unreachable"
-          ? "bg-red-400"
-          : "bg-white/40";
-  const textColor = isDown ? "text-red-200" : "text-white/70";
+        ? "border-warn/40 bg-warn/10 text-warn"
+        : isDown
+          ? "border-crit/40 bg-crit/10 text-crit"
+          : "border-line bg-raised text-dim";
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1.5 border border-white/10 bg-white/[0.035] px-2 py-1 text-xs font-medium sm:text-sm ${textColor}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 border px-2 py-0.5 text-[11px] font-medium ${tone}`}
       aria-label={`Host status: ${label}`}
       title={`Host status: ${label}`}
     >
-      <span className={`h-2 w-2 rounded-full ${dotColor}`} aria-hidden="true" />
+      <span className={`h-1.5 w-1.5 rounded-full bg-current ${status === "healthy" ? "pulse" : ""}`} aria-hidden="true" />
       <span aria-hidden="true">{label}</span>
     </span>
   );
@@ -477,12 +531,12 @@ function ServerRuntimeMeta({
     `${runningJobs} running job${runningJobs === 1 ? "" : "s"}`,
   ].filter(Boolean);
   return (
-    <div className="min-w-0 text-xs font-normal leading-5 text-white/50">
+    <div className="min-w-0 text-xs font-normal leading-5 text-dim">
       <p className="whitespace-normal" title={parts.join(" / ")}>
         {parts.join(" · ")}
       </p>
       <p
-        className="mt-0.5 break-all font-mono text-[10px] leading-4 text-white/30"
+        className="mt-0.5 break-all font-mono text-[10px] leading-4 text-dim"
         title={`Server ID: ${vps.id} · SSH user: ${vps.username}`}
       >
         ID {vps.id} · SSH {vps.username}
@@ -491,76 +545,12 @@ function ServerRuntimeMeta({
   );
 }
 
-// ── ServerSystemInfoStrip ────────────────────────────────────────────
-
-function ServerSystemInfoStrip({
-  vps,
-  systemInfo,
-}: {
-  vps: VpsRecord;
-  systemInfo?: DashboardOverview["systemInfo"][number];
-}) {
-  if (!systemInfo) {
-    return (
-      <section className="min-w-0 p-3 sm:p-4" aria-label="System information">
-        <SectionLabel>System</SectionLabel>
-        <p className="mt-2 text-xs font-normal text-white/40">
-          System info not reported yet.
-        </p>
-        <ServerLocationMeta vps={vps} />
-        <ServerAnnotations vps={vps} />
-      </section>
-    );
-  }
-
-  const osLabel =
-    systemInfo.os?.prettyName ||
-    systemInfo.os?.name ||
-    systemInfo.os?.family ||
-    "OS n/a";
-  const kernelParts = [
-    systemInfo.kernel?.release,
-    systemInfo.kernel?.arch,
-  ].filter(Boolean);
-  const cpuLabel =
-    [
-      systemInfo.cpu?.cores ? `${systemInfo.cpu.cores} cores` : null,
-      systemInfo.cpu?.model,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "CPU n/a";
-  const memoryLabel = systemInfo.memory?.totalBytes
-    ? `${formatBytes(systemInfo.memory.totalBytes)} RAM`
-    : "RAM n/a";
-  const diskLabel = systemInfo.rootDisk?.totalBytes
-    ? `${formatBytes(systemInfo.rootDisk.totalBytes)} disk${systemInfo.rootDisk.fsType ? ` · ${systemInfo.rootDisk.fsType}` : ""}`
-    : "Disk n/a";
-
-  return (
-    <section className="min-w-0 p-3 sm:p-4" aria-label="System information">
-      <SectionLabel>System</SectionLabel>
-      <p className="mt-2 truncate text-sm font-normal text-white/80" title={osLabel}>
-        {osLabel}
-      </p>
-      <div className="mt-1 grid gap-0.5 text-xs leading-5 text-white/50">
-        <p className="truncate" title={kernelParts.join(" · ") || undefined}>
-          {kernelParts.length ? kernelParts.join(" · ") : "Kernel n/a"}
-        </p>
-        <p className="truncate" title={cpuLabel}>{cpuLabel}</p>
-        <p className="truncate" title={`${memoryLabel} · ${diskLabel}`}>
-          {memoryLabel} · {diskLabel}
-        </p>
-      </div>
-      <ServerLocationMeta vps={vps} />
-      <ServerAnnotations vps={vps} />
-    </section>
-  );
-}
+// ── Compact metadata helpers ─────────────────────────────────────────
 
 function ServerLocationMeta({ vps }: { vps: VpsRecord }) {
   const location = [vps.city, vps.country].filter(Boolean).join(", ") || "Location not detected";
   return (
-    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-white/40">
+    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-dim">
       <span className="inline-flex min-w-0 items-center gap-1">
         <ServerCog size={12} aria-hidden="true" />
         <span className="truncate">{vps.provider || "Provider not set"}</span>
@@ -568,7 +558,7 @@ function ServerLocationMeta({ vps }: { vps: VpsRecord }) {
       <span aria-hidden="true">·</span>
       <span className="inline-flex min-w-0 items-center gap-1">
         <MapPin size={12} aria-hidden="true" />
-        <span className="truncate text-white/65" title={location}>{location}</span>
+        <span className="truncate" title={location}>{location}</span>
       </span>
     </div>
   );
@@ -579,14 +569,14 @@ function ServerAnnotations({ vps }: { vps: VpsRecord }) {
     <>
       {vps.tags?.length ? (
         <p
-          className="mt-2 truncate text-[11px] text-white/40"
+          className="mt-1.5 truncate text-[11px] text-dim"
           title={`Tags: ${vps.tags.join(", ")}`}
         >
           Tags · {vps.tags.join(", ")}
         </p>
       ) : null}
       {vps.notes ? (
-        <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/50">
+        <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-dim">
           {vps.notes}
         </p>
       ) : null}
@@ -594,54 +584,29 @@ function ServerAnnotations({ vps }: { vps: VpsRecord }) {
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[11px] font-normal uppercase tracking-[0.14em] text-white/50">
-      {children}
-    </p>
-  );
-}
-
-// ── ServerMetricStrip ────────────────────────────────────────────────
-
-function ServerMetricStrip({
-  metric,
-}: {
-  metric?: DashboardOverview["metrics"][number];
-}) {
-  const base = "flex items-baseline justify-between gap-3 text-xs text-white/70";
-  return (
-    <section className="min-w-0 p-3 sm:p-4" aria-label="Resource usage">
-      <SectionLabel>Resources</SectionLabel>
-      <div className="mt-2 grid gap-2.5">
-        <TelemetryMeter label="CPU" value={metric?.cpu} />
-        <TelemetryMeter label="RAM" value={metric?.memory} />
-        <TelemetryMeter label="Disk" value={metric?.disk} />
-        <p className={base}>
-          <span className="text-white/50">Load</span>
-          <span>{metric ? metric.loadAverage : "n/a"}</span>
-        </p>
-      </div>
-    </section>
-  );
-}
-
 function TelemetryMeter({ label, value }: { label: string; value?: number }) {
   const hasValue = typeof value === "number" && Number.isFinite(value);
   const normalizedValue = hasValue ? Math.min(100, Math.max(0, value)) : 0;
-  const meterColor = !hasValue
-    ? "bg-white/20"
-    : value >= 90
-      ? "bg-red-500"
+  const meterTone = !hasValue
+    ? "text-dim"
+    : value >= 85
+      ? "text-crit"
       : value >= 70
-        ? "bg-amber-400"
-        : "bg-emerald-500";
+        ? "text-warn"
+        : "text-signal";
+  const meterColor = !hasValue
+    ? "bg-line"
+    : value >= 85
+      ? "bg-crit"
+      : value >= 70
+        ? "bg-warn"
+        : "bg-signal";
 
   return (
     <div className="min-w-0">
-      <div className="flex items-baseline justify-between gap-3 text-xs">
-        <span className="text-white/50">{label}</span>
-        <span className="text-white/70">{hasValue ? `${value}%` : "n/a"}</span>
+      <div className="flex items-baseline justify-between gap-3 text-[12px]">
+        <span className="text-dim">{label}</span>
+        <span className={`tnum ${meterTone}`}>{hasValue ? `${value.toFixed(1)}%` : "n/a"}</span>
       </div>
       {hasValue ? (
         <div
@@ -650,15 +615,15 @@ function TelemetryMeter({ label, value }: { label: string; value?: number }) {
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={normalizedValue}
-          className="mt-1.5 h-1 w-full overflow-hidden bg-white/10"
+          className="mt-1.5 h-1 w-full overflow-hidden bg-line"
         >
           <div
-            className={`h-full ${meterColor} transition-[width] duration-300`}
+            className={`h-full ${meterColor} transition-all duration-500`}
             style={{ width: `${normalizedValue}%` }}
           />
         </div>
       ) : (
-        <div className="mt-1.5 h-1 w-full bg-white/10" aria-hidden="true" />
+        <div className="mt-1.5 h-1 w-full bg-line" aria-hidden="true" />
       )}
     </div>
   );

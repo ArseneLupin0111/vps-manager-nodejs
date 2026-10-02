@@ -15,13 +15,13 @@ export function DockerCapabilityNotice({
   if (!enabled) {
     return (
       <div
-        className="rounded-none border border-white/10 bg-black/10 p-4"
+        className="border border-line bg-panel p-4"
         role="status"
       >
-        <p className="text-xs font-medium text-white/70">
+        <p className="text-[13px] font-medium text-text">
           Docker monitoring is off for this server.
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-white/45">
+        <p className="mt-1 text-[12px] leading-relaxed text-dim">
           Detail sections (history, operational events, alerts, storage
           overview) stay hidden until monitoring is enabled. Enabling
           monitoring does not grant container control: this view is
@@ -34,14 +34,14 @@ export function DockerCapabilityNotice({
   if (waiting) {
     return (
       <div
-        className="rounded-none border border-white/10 bg-black/10 p-4"
+        className="border border-line bg-panel p-4"
         role="status"
       >
-        <p className="flex items-center gap-2 text-xs text-white/70">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-sky-300" />
+        <p className="flex items-center gap-2 text-[13px] text-text">
+          <span className="pulse h-2 w-2 rounded-full bg-info" />
           Waiting for Docker-capable agent.
         </p>
-        <p className="mt-1 pl-4 text-[11px] text-white/40">
+        <p className="mt-1 pl-4 text-[12px] text-dim">
           Detail sections appear here automatically once the agent reports a
           snapshot. Bounded history, events, alerts, and the storage overview
           require an agent that reports Docker schema details.

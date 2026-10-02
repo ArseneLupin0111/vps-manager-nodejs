@@ -67,24 +67,24 @@ export function AgentLifecycleStatus({ vps, jobs, compact = false }: {
     const rotating = job.type === "rotate-agent";
     const label = rotating ? "Rotating credential" : restarting ? "Restarting agent" : upgrading ? "Upgrading agent" : stepLabels[job.step || ""] || (removing ? "Removing agent" : "Installing agent");
     return (
-      <div className={compact ? "min-w-[150px]" : "mt-3 border-t border-white/10 pt-3"} aria-live="polite">
+      <div className={compact ? "min-w-[150px]" : "mt-3 border-t border-line pt-3"} aria-live="polite">
         <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="inline-flex items-center gap-1.5 text-white/75">
-            <LoaderCircle size={13} className="animate-spin text-sky-300" aria-hidden="true" />
+          <span className="inline-flex items-center gap-1.5 text-text">
+            <LoaderCircle size={13} className="animate-spin text-info" aria-hidden="true" />
             {label}
           </span>
-          <span className="tabular-nums text-white/45">{progress}%</span>
+          <span className="tabular-nums text-dim">{progress}%</span>
         </div>
-        <div role="progressbar" aria-label={`${removing ? "Agent removal" : rotating ? "Agent rotation" : restarting ? "Agent restart" : upgrading ? "Agent upgrade" : "Agent install"}: ${label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="mt-2 h-1.5 overflow-hidden bg-white/10">
-          <div className="h-full bg-sky-400 transition-[width] duration-500" style={{ width: `${progress}%` }} />
+        <div role="progressbar" aria-label={`${removing ? "Agent removal" : rotating ? "Agent rotation" : restarting ? "Agent restart" : upgrading ? "Agent upgrade" : "Agent install"}: ${label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="mt-2 h-1.5 overflow-hidden bg-raised">
+          <div className="h-full bg-info transition-[width] duration-500" style={{ width: `${progress}%` }} />
         </div>
       </div>
     );
   }
 
-  if (status === "online") return <span className="inline-flex items-center gap-1.5 text-xs text-emerald-300" role="status"><CheckCircle2 size={13} aria-hidden="true" />Agent online</span>;
-  if (status === "offline") return <span className="inline-flex items-center gap-1.5 text-xs text-amber-300" role="status"><Radio size={13} aria-hidden="true" />Agent offline</span>;
-  if (status === "failed") return <span className="inline-flex items-center gap-1.5 text-xs text-red-300" role="alert" title={job?.errorMessage || vps.agentLastError}><AlertCircle size={13} aria-hidden="true" />{job?.errorMessage || vps.agentLastError || "Agent action failed"}</span>;
+  if (status === "online") return <span className="inline-flex items-center gap-1.5 text-xs text-signal" role="status"><CheckCircle2 size={13} aria-hidden="true" />Agent online</span>;
+  if (status === "offline") return <span className="inline-flex items-center gap-1.5 text-xs text-warn" role="status"><Radio size={13} aria-hidden="true" />Agent offline</span>;
+  if (status === "failed") return <span className="inline-flex items-center gap-1.5 text-xs text-crit" role="alert" title={job?.errorMessage || vps.agentLastError}><AlertCircle size={13} aria-hidden="true" />{job?.errorMessage || vps.agentLastError || "Agent action failed"}</span>;
   if (vps.kind === "local" || vps.managedBy === "system") {
     // Local host: the persisted lifecycle row can be missing while the local
     // process keeps reporting (the supervisor marks the record seen on every
@@ -92,9 +92,9 @@ export function AgentLifecycleStatus({ vps, jobs, compact = false }: {
     // shows the observed version/heartbeat. Never assert "not installed" over
     // that observation — mirror it instead with the shared observed label.
     const observed = localAgentLabel(vps.lastSeenAt);
-    if (observed === "Online") return <span className="inline-flex items-center gap-1.5 text-xs text-emerald-300" role="status"><CheckCircle2 size={13} aria-hidden="true" />Agent online</span>;
-    if (observed === "Offline") return <span className="inline-flex items-center gap-1.5 text-xs text-amber-300" role="status"><Radio size={13} aria-hidden="true" />Agent offline</span>;
-    return <span className="text-xs text-white/45">Agent status unknown</span>;
+    if (observed === "Online") return <span className="inline-flex items-center gap-1.5 text-xs text-signal" role="status"><CheckCircle2 size={13} aria-hidden="true" />Agent online</span>;
+    if (observed === "Offline") return <span className="inline-flex items-center gap-1.5 text-xs text-warn" role="status"><Radio size={13} aria-hidden="true" />Agent offline</span>;
+    return <span className="text-xs text-dim">Agent status unknown</span>;
   }
-  return <span className="text-xs text-white/45">Agent not installed</span>;
+  return <span className="text-xs text-dim">Agent not installed</span>;
 }

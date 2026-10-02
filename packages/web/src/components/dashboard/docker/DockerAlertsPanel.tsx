@@ -39,27 +39,29 @@ export function DockerAlertsPanel({
 
   if (loading) {
     return (
-      <section aria-label="Docker alerts" aria-busy="true" className="rounded-none border border-white/10 bg-black/10 p-4">
-        <p className="text-xs text-white/50">Loading Docker alerts…</p>
+      <section aria-label="Docker alerts" aria-busy="true" className="border border-line bg-panel p-4">
+        <p className="text-[12px] text-dim">Loading Docker alerts…</p>
       </section>
     );
   }
   if (error) {
     return (
-      <section aria-label="Docker alerts" className="rounded-none border border-white/10 bg-black/10 p-4">
-        <p className="text-xs text-white/70">Docker alerts are unavailable right now.</p>
-        <p className="mt-1 text-[11px] text-white/40">{error}</p>
+      <section aria-label="Docker alerts" className="border border-line bg-panel p-4">
+        <p className="text-[12px] text-text">Docker alerts are unavailable right now.</p>
+        <p className="mt-1 text-[11px] text-dim">{error}</p>
       </section>
     );
   }
   return (
-    <section aria-label="Docker alerts" className="rounded-none border border-white/10 bg-black/10 p-4">
-      <h3 className="text-xs font-medium text-white/75">Alerts</h3>
-      <p className="mt-1 text-[11px] text-white/40">
-        showing {alerts.length} loaded alerts
-      </p>
+    <section aria-label="Docker alerts" className="border border-line bg-panel p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-[14px] font-semibold">Alerts</h3>
+        <p className="text-[12px] text-dim">
+          showing {alerts.length} loaded alerts
+        </p>
+      </div>
       {ackError ? (
-        <p role="alert" className="mt-2 text-[11px] text-rose-200">
+        <p role="alert" className="mt-2 text-[11px] text-crit">
           {ackError}
         </p>
       ) : null}
@@ -70,13 +72,16 @@ export function DockerAlertsPanel({
       ) : (
         <ul className="mt-3 space-y-2">
           {alerts.map((alert) => (
-            <li key={alert.id} className="rounded-none border border-white/10 bg-black/20 px-3 py-2 text-[12px]">
+            <li key={alert.id} className="border border-line bg-raised px-3 py-2 text-[12px]">
               <p className="flex items-center justify-between gap-2">
-                <span className="font-medium text-white/85">{alert.ruleKind}</span>
-                <span className="flex items-center gap-2 text-white/50">{alert.state}{vpsId && alert.state === "open" ? <button type="button" disabled={busy === alert.id} className="text-sky-200 underline" onClick={() => { void acknowledge(alert.id); }}>{busy === alert.id ? "Acknowledging…" : "Acknowledge"}</button> : null}</span>
+                <span className="font-medium text-text">{alert.ruleKind}</span>
+                <span className="flex items-center gap-2">
+                  <span className={alert.state === "open" ? "text-warn" : "text-dim"}>{alert.state}</span>
+                  {vpsId && alert.state === "open" ? <button type="button" disabled={busy === alert.id} className="border border-line px-2 py-0.5 text-[11px] font-medium text-text transition-colors hover:border-dim hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-40" onClick={() => { void acknowledge(alert.id); }}>{busy === alert.id ? "Acknowledging…" : "Acknowledge"}</button> : null}
+                </span>
               </p>
-              <p className="mt-0.5 text-white/60">{alert.summary}</p>
-              <p className="mt-0.5 text-white/40">
+              <p className="mt-0.5 text-dim">{alert.summary}</p>
+              <p className="mt-0.5 text-[11px] text-dim">
                 {alert.occurrences} occurrence{alert.occurrences === 1 ? "" : "s"} · opened {new Date(alert.openedAt).toLocaleString()}
               </p>
             </li>

@@ -666,7 +666,7 @@ describe("React dashboard", () => {
     renderApp();
 
     // Wait for server cards to be visible after data loads
-    expect(await screen.findByText("edge-sgp-01")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "edge-sgp-01" })).toBeInTheDocument();
     expect(screen.getByText("Hetzner")).toBeInTheDocument();
     expect(screen.getByText("Location not detected")).toBeInTheDocument();
     expect(screen.getByText("Handles public ingress.")).toBeInTheDocument();
@@ -752,12 +752,12 @@ describe("React dashboard", () => {
 
     renderApp();
 
-    expect(await screen.findByText("Primary production")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Primary production" })).toBeInTheDocument();
     expect(screen.queryByText("prod-sgp-01")).not.toBeInTheDocument();
     expect(screen.getByText("Primary node")).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Search servers"), "ovh");
     expect(screen.queryByText("prod-sgp-01")).not.toBeInTheDocument();
-    expect(screen.getByText("dev-fra-01")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "dev-fra-01" })).toBeInTheDocument();
   });
 
   describe("SSE live monitoring events", () => {
@@ -845,7 +845,7 @@ describe("React dashboard", () => {
         auditEvents: [],
       });
 
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
       expect(
         await screen.findByText("Waiting for Docker-capable agent."),
       ).toBeInTheDocument();
@@ -973,8 +973,9 @@ describe("React dashboard", () => {
       expect(
         await screen.findByText("student_replacement_1"),
       ).toBeInTheDocument();
-      expect(screen.getByText("1 running")).toBeInTheDocument();
-      expect(screen.getByText("0 stopped")).toBeInTheDocument();
+      const webCard = screen.getByRole("article", { name: "Server web-01" });
+      expect(within(webCard).getByText("1 running")).toBeInTheDocument();
+      expect(within(webCard).getByText("0 stopped")).toBeInTheDocument();
       expect(screen.queryByText("api")).not.toBeInTheDocument();
       expect(screen.queryByText("worker")).not.toBeInTheDocument();
 
@@ -1077,7 +1078,7 @@ describe("React dashboard", () => {
       });
 
       // Wait for VPS list to load
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       // Dispatch an unknown event type
       mockEventSourceInstance?.dispatchEvent(
@@ -1086,7 +1087,7 @@ describe("React dashboard", () => {
       );
 
       // App should still be functional
-      expect(screen.getByText("web-01")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       // Dispatch a valid metrics.updated to ensure it still works
       const metricsPayload = {
@@ -1112,7 +1113,7 @@ describe("React dashboard", () => {
       );
 
       // Server card still shown
-      expect(screen.getByText("web-01")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       expect(localStorage.length).toBe(0);
     });
@@ -1421,7 +1422,7 @@ describe("React dashboard", () => {
 
       renderApp(["/vps"]);
 
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       // Each card should have a Manage link
       const manageLinks = screen.getAllByRole("link", { name: /Manage/i });
@@ -1447,7 +1448,7 @@ describe("React dashboard", () => {
         .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [] }) });
 
       renderApp(["/vps"]);
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       mockEventSourceInstance?.dispatchEvent(
         "jobs.updated",
@@ -1557,7 +1558,7 @@ describe("React dashboard", () => {
       renderApp(["/vps"]);
 
       // Wait for server list to load
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       // Open user menu dropdown and click Log out
       await userEvent.click(
@@ -1800,7 +1801,7 @@ describe("React dashboard", () => {
       renderApp(["/vps/vps-1"]);
 
       // Wait for dashboard to load and VPS workspace to render
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
       // Workspace header shows the endpoint as username@host:port
       expect(screen.getByText("root@10.0.0.1:22")).toBeInTheDocument();
       // Overview tab should be active by default
@@ -1821,8 +1822,9 @@ describe("React dashboard", () => {
       renderApp(["/vps/vps-1/metrics"]);
 
       expect(await screen.findByText("Metrics for web-01")).toBeInTheDocument();
-      expect(screen.getByText("Docker workloads")).toBeInTheDocument();
-      expect(screen.getByText("workspace-api")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 2, name: "Docker workloads" })).toBeInTheDocument();
+      const dockerMetricsSection = screen.getByRole("region", { name: "Docker metrics" });
+      expect(within(dockerMetricsSection).getByText("workspace-api")).toBeInTheDocument();
       expect(screen.getByText("app:latest")).toBeInTheDocument();
       expect(
         screen.getByRole("region", { name: "Docker metrics summary" }),
@@ -1838,7 +1840,6 @@ describe("React dashboard", () => {
       expect(screen.getByText("Container snapshot")).toBeInTheDocument();
       const dockerTab = screen.getByRole("link", { name: "Docker" });
       expect(dockerTab).toHaveAttribute("href", "/vps/vps-1/docker");
-      expect(dockerTab).toHaveClass("border-white");
     });
 
     it("does not embed Docker monitoring in the workspace overview", async () => {
@@ -1846,7 +1847,7 @@ describe("React dashboard", () => {
 
       renderApp(["/vps/vps-1"]);
 
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Docker monitoring" })).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Docker" })).toHaveAttribute("href", "/vps/vps-1/docker");
     });
@@ -1912,7 +1913,7 @@ describe("React dashboard", () => {
 
       renderApp(["/vps/vps-1"]);
 
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       await userEvent.click(
         screen.getByRole("button", { name: "Open local admin account menu" }),
@@ -1933,7 +1934,7 @@ describe("React dashboard", () => {
       renderApp(["/vps/vps-1"]);
 
       // Wait for workspace to render
-      expect(await screen.findByText("web-01")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
 
       // The scoped bootstrap calls should have been made (called without params, so no query string)
       await waitFor(() => {
@@ -2179,7 +2180,7 @@ describe("React dashboard", () => {
       };
       queueInitialEditLoad();
       renderApp(["/vps"]);
-      expect(await screen.findByText("Production API")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Production API" })).toBeInTheDocument();
 
       await openEditMenu(user);
       await user.click(screen.getByRole("menuitem", { name: "Edit server" }));
@@ -2232,7 +2233,7 @@ describe("React dashboard", () => {
           }),
         ),
       );
-      expect(await screen.findByText("Production API East")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Production API East" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Edit server" })).not.toBeInTheDocument();
       expect(screen.getByText("Updated Production API East.")).toBeInTheDocument();
     });
@@ -2242,7 +2243,7 @@ describe("React dashboard", () => {
       const clearedServer = { ...editableServer, provider: "unknown" };
       queueInitialEditLoad();
       renderApp(["/vps"]);
-      expect(await screen.findByText("Production API")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Production API" })).toBeInTheDocument();
       await openEditMenu(user);
       await user.click(screen.getByRole("menuitem", { name: "Edit server" }));
       await user.clear(screen.getByLabelText("Provider"));
@@ -2272,7 +2273,7 @@ describe("React dashboard", () => {
       expect(screen.getByPlaceholderText("Search name, host, provider, city, country, tag...")).toBeInTheDocument();
 
       await user.type(screen.getByLabelText("Search servers"), "singapore");
-      expect(screen.getByText("Production API")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Production API" })).toBeInTheDocument();
       expect(screen.queryByText("Backup")).not.toBeInTheDocument();
 
       await user.clear(screen.getByLabelText("Search servers"));
@@ -2287,7 +2288,7 @@ describe("React dashboard", () => {
       const user = userEvent.setup();
       queueInitialEditLoad();
       renderApp(["/vps"]);
-      expect(await screen.findByText("Production API")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Production API" })).toBeInTheDocument();
       await openEditMenu(user);
       await user.click(screen.getByRole("menuitem", { name: "Edit server" }));
 
@@ -2309,7 +2310,7 @@ describe("React dashboard", () => {
       const user = userEvent.setup();
       queueInitialEditLoad();
       renderApp(["/vps"]);
-      expect(await screen.findByText("Production API")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Production API" })).toBeInTheDocument();
       await openEditMenu(user);
       await user.click(screen.getByRole("menuitem", { name: "Edit server" }));
 
@@ -2346,7 +2347,7 @@ describe("React dashboard", () => {
         fetchMock.mockReset();
         queueInitialEditLoad(policyCase.server, policyCase.mode);
         renderApp(["/vps"]);
-        expect(await screen.findByText("Production API")).toBeInTheDocument();
+        expect(await screen.findByRole("heading", { name: "Production API" })).toBeInTheDocument();
 
         await openEditMenu(user);
         expect(screen.getByRole("menuitem", { name: policyCase.label })).toHaveAttribute(

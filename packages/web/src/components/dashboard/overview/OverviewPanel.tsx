@@ -1,15 +1,4 @@
-import { type LucideIcon } from "lucide-react";
-import {
-  Activity,
-  Cpu,
-  HardDrive,
-  KeyRound,
-  MemoryStick,
-  Network,
-  Server,
-} from "lucide-react";
 import { Alert } from "../../ui/alert";
-import { Card, CardContent, CardHeader, CardTitle } from "../../ui/card";
 import type { DashboardOverview } from "../../../lib/api";
 import { formatBytes } from "../shared/formatBytes";
 import { AuditPanel } from "../audit/AuditPanel";
@@ -18,287 +7,203 @@ import { JobsPanel } from "../jobs/JobsPanel";
 export function DemoBanner({ overview }: { overview: DashboardOverview }) {
   if (!overview.banner) return null;
   return (
-    <Alert className="mb-4 rounded-none border-0 bg-white/[0.03]/75 text-primary shadow-none ring-1 ring-primary/10">
+    <Alert variant="success" className="mb-0 border-line bg-panel text-text">
       {overview.banner}
     </Alert>
   );
 }
 
-export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
-  const avg = (key: "cpu" | "memory" | "disk") =>
-    overview.metrics.length
-      ? Math.round(
-          overview.metrics.reduce((sum, metric) => sum + metric[key], 0) /
-            overview.metrics.length,
-        )
-      : 0;
-  const avgNetworkRx = overview.metrics.length
-    ? Math.round(
-        overview.metrics.reduce((sum, metric) => sum + metric.networkRx, 0) /
-          overview.metrics.length,
-      )
-    : 0;
-  const avgNetworkTx = overview.metrics.length
-    ? Math.round(
-        overview.metrics.reduce((sum, metric) => sum + metric.networkTx, 0) /
-          overview.metrics.length,
-      )
-    : 0;
-  const warningTotal =
-    overview.summary.warningServers + overview.summary.unreachableServers;
+type KpiTone = "ok" | "warn" | "crit" | "idle";
 
-  function findTrend(unit?: string) {
-    return overview.metrics.find((m) => m.trend?.unit === unit)?.trend ?? null;
-  }
-
-  const cpuTrend = findTrend("cpu");
-  const memTrend = findTrend("memory");
-  const diskTrend = findTrend("disk");
-  const netTrend = findTrend("network") || findTrend();
-
+function Kpi({
+  label,
+  value,
+  sub,
+  tone = "ok",
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  tone?: KpiTone;
+}) {
+  const valueTone =
+    tone === "crit"
+      ? "text-crit"
+      : tone === "warn"
+        ? "text-warn"
+        : tone === "idle"
+          ? "text-dim"
+          : "text-text";
   return (
-    <div className="min-w-0 space-y-5 overflow-visible">
-      <section
-        className="grid min-w-0 gap-3 xl:grid-cols-3"
-        aria-label="Operations overview"
+    <div className="min-w-0 border border-line bg-panel p-4">
+      <p className="truncate text-[11px] uppercase tracking-[0.14em] text-dim">
+        {label}
+      </p>
+      <p
+        className={`tnum mt-1.5 truncate text-2xl font-medium ${valueTone}`}
+        title={value}
       >
-        <HeroStat
-          tone="healthy"
-          label="Fleet health"
-          title={`${overview.summary.healthyServers} healthy`}
-          detail={`${overview.summary.totalServers} total · ${warningTotal} need attention`}
-          icon={Server}
-        />
-        <HeroStat
-          tone="work"
-          label="Key & job status"
-          title={`${overview.summary.runningJobs} running`}
-          detail="Provisioning and verification queue"
-          icon={KeyRound}
-        />
-        <HeroStat
-          tone="load"
-          label="Resource balance"
-          title={`${avg("cpu")}% CPU`}
-          detail={`${avg("memory")}% RAM · ${avg("disk")}% disk`}
-          icon={Activity}
-        />
-      </section>
-      <DemoBanner overview={overview} />
-      <section className="grid min-w-0 gap-4 md:grid-cols-2 2xl:grid-cols-4">
-        <TrendCard
-          label="CPU load"
-          value={`${avg("cpu")}%`}
-          detail={
-            cpuTrend
-              ? `${cpuTrend.range} · min ${cpuTrend.min}% max ${cpuTrend.max}%`
-              : `${overview.metrics.length} backend samples`
-          }
-          icon={Cpu}
-          tone="cyan"
-          trend={cpuTrend}
-        />
-        <TrendCard
-          label="Memory pressure"
-          value={`${avg("memory")}%`}
-          detail={
-            memTrend
-              ? `${memTrend.range} · min ${memTrend.min}% max ${memTrend.max}%`
-              : "No backend trend"
-          }
-          icon={MemoryStick}
-          tone="violet"
-          trend={memTrend}
-        />
-        <TrendCard
-          label="Disk usage"
-          value={`${avg("disk")}%`}
-          detail={
-            diskTrend
-              ? `${diskTrend.range} · min ${diskTrend.min}% max ${diskTrend.max}%`
-              : `across ${overview.metrics.length} servers`
-          }
-          icon={HardDrive}
-          tone="amber"
-          trend={diskTrend}
-        />
-        <TrendCard
-          label="Network in/out"
-          value={`${formatBytes(avgNetworkRx)}/${formatBytes(avgNetworkTx)}`}
-          detail={
-            netTrend
-              ? `${netTrend.range} · min ${netTrend.min}${netTrend.unit || ""} max ${netTrend.max}${netTrend.unit || ""}`
-              : "No backend trend"
-          }
-          icon={Network}
-          tone="slate"
-          trend={netTrend}
-        />
-      </section>
-      <div className="grid min-w-0 max-w-full gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <AuditPanel events={overview.auditEvents.slice(0, 5)} compact />
-        <JobsPanel jobs={overview.jobs.slice(0, 5)} compact />
-      </div>
+        {value}
+      </p>
+      <p className="mt-0.5 truncate text-[12px] text-dim" title={sub}>
+        {sub}
+      </p>
     </div>
   );
 }
 
-function HeroStat({
-  tone,
-  label,
-  title,
-  detail,
-  icon: Icon,
-}: {
-  tone: "healthy" | "work" | "load";
-  label: string;
-  title: string;
-  detail: string;
-  icon: LucideIcon;
-}) {
-  const tones = {
-    healthy:
-      "border-white/10 bg-white/[0.03] text-[#ffffff] before:bg-[#ffffff]",
-    work: "border-white/10 bg-white/[0.03] text-[#ffffff] before:bg-neutral-300",
-    load: "border-white/10 bg-white/[0.03] text-[#ffffff] before:bg-[#ffffff]",
-  };
-  return (
-    <article
-      className={`${tones[tone]} before:absolute before:inset-x-0 before:top-0 before:h-1 relative min-h-28 min-w-0 overflow-hidden rounded-none border p-4 pt-5 shadow-none transition duration-300  sm:min-h-32`}
-    >
-      <div className="absolute -right-10 -top-12 h-24 w-24 rounded-none bg-current/10 blur-2xl" />
-      <div className="relative flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-[11px] font-normal uppercase tracking-[0.2em] text-white/50">
-            {label}
-          </p>
-          <h2 className="mt-2 truncate font-display text-2xl font-normal tracking-normal text-[#ffffff] sm:text-[1.8rem]">
-            {title}
-          </h2>
-          <p className="mt-1 truncate text-[14px] font-normal leading-6 text-white/50">
-            {detail}
-          </p>
-        </div>
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-none border border-white/10 bg-white/[0.03] text-[#ffffff]">
-          <Icon size={20} />
-        </span>
-      </div>
-    </article>
-  );
-}
+export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
+  const server = overview.servers[0];
+  const metric = overview.metrics[0];
+  const sysInfo = overview.systemInfo[0];
+  const docker = overview.dockerMetrics[0];
 
-function TrendCard({
-  label,
-  value,
-  detail,
-  icon: Icon,
-  trend,
-  tone,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  icon: LucideIcon;
-  trend?: {
-    points: number[];
-    min: number;
-    max: number;
-    threshold: number;
-    range?: string;
-    unit?: string;
-  } | null;
-  tone: "cyan" | "violet" | "amber" | "slate";
-}) {
-  const stroke = {
-    cyan: "#ffffff",
-    violet: "#ffffff",
-    amber: "#ffffff",
-    slate: "rgba(255,255,255,0.5)",
-  }[tone];
-  const points = trend?.points ?? [];
-  const normalized = points.map((point) => Math.min(92, Math.max(8, point)));
-  const polyline = normalized
-    .map(
-      (point, index) =>
-        `${normalized.length > 1 ? (index / (normalized.length - 1)) * 100 : 50},${54 - point / 2}`,
-    )
-    .join(" ");
-  const max = trend?.max ?? null;
-  const min = trend?.min ?? null;
-  const threshold = trend?.threshold ?? null;
-  const range = trend?.range ?? null;
-  const isHot = max != null && threshold != null ? max >= threshold : false;
+  const statusValue = server
+    ? server.status === "healthy"
+      ? "Healthy"
+      : server.status === "warning"
+        ? "Warning"
+        : server.status === "unreachable"
+          ? "Unreachable"
+          : "Unknown"
+    : "Unknown";
+  const statusTone: KpiTone = server
+    ? server.status === "healthy"
+      ? "ok"
+      : server.status === "warning"
+        ? "warn"
+        : server.status === "unreachable"
+          ? "crit"
+          : "idle"
+    : "idle";
+
+  const cpuPct = metric?.cpu;
+  const ramPct = metric?.memory;
+  const diskPct = metric?.disk;
+  const fmtPct = (value?: number) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? `${value.toFixed(1)}%`
+      : "n/a";
+  const pctTone = (value?: number): KpiTone =>
+    typeof value !== "number" || !Number.isFinite(value)
+      ? "idle"
+      : value >= 85
+        ? "crit"
+        : value >= 70
+          ? "warn"
+          : "ok";
+
+  const containersValue = docker?.available
+    ? `${docker.containerRunning}/${docker.containerTotal}`
+    : "n/a";
+  const containersTone: KpiTone = docker?.available
+    ? docker.containerTotal - docker.containerRunning > 0
+      ? "warn"
+      : "ok"
+    : "idle";
+
+  const sysCells = [
+    {
+      label: "OS",
+      value:
+        sysInfo?.os?.prettyName ||
+        sysInfo?.os?.name ||
+        sysInfo?.os?.family ||
+        "n/a",
+    },
+    {
+      label: "Kernel",
+      value:
+        [sysInfo?.kernel?.release, sysInfo?.kernel?.arch]
+          .filter(Boolean)
+          .join(" ") || "n/a",
+    },
+    {
+      label: "CPU",
+      value: sysInfo?.cpu?.model || "n/a",
+    },
+    {
+      label: "Location",
+      value:
+        [server?.city, server?.country].filter(Boolean).join(", ") ||
+        "Location not detected",
+    },
+  ];
+
   return (
-    <Card
-      className={`min-w-0 overflow-hidden rounded-none border-0 bg-white/[0.03] shadow-none  transition duration-300  hover:border-white/20 ${isHot ? "ring-2 ring-white/10" : ""}`}
-    >
-      <CardContent className="p-4">
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-xs font-normal uppercase tracking-[0.14em] text-white/50">
-              {label}
-            </p>
-            <strong className="mt-1 block truncate text-2xl font-normal text-[#ffffff]">
-              {value}
-            </strong>
-            <p className="mt-1 truncate text-[15px] font-normal leading-6 text-white/50">
-              {detail}
-            </p>
-          </div>
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-none border-0 bg-white/[0.03] shadow-none text-white/70 shadow-none">
-            <Icon size={18} />
-          </span>
+    <div className="grid min-w-0 gap-6">
+      <DemoBanner overview={overview} />
+
+      {/* Exactly 5 KPIs: status → CPU → RAM → disk → containers */}
+      <section
+        className="grid min-w-0 grid-cols-5 gap-3 max-[1000px]:grid-cols-2"
+        aria-label="Server overview"
+      >
+        <Kpi
+          label="Status"
+          value={statusValue}
+          sub={server ? (server.provider || "Provider not set") : "No server data"}
+          tone={statusTone}
+        />
+        <Kpi
+          label="CPU"
+          value={fmtPct(cpuPct)}
+          sub={sysInfo?.cpu?.model || "Awaiting snapshot"}
+          tone={pctTone(cpuPct)}
+        />
+        <Kpi
+          label="RAM"
+          value={fmtPct(ramPct)}
+          sub={sysInfo?.memory?.totalBytes ? `${formatBytes(sysInfo.memory.totalBytes)} total` : "Awaiting snapshot"}
+          tone={pctTone(ramPct)}
+        />
+        <Kpi
+          label="Disk"
+          value={fmtPct(diskPct)}
+          sub={sysInfo?.rootDisk?.totalBytes ? `${formatBytes(sysInfo.rootDisk.totalBytes)} total` : "Awaiting snapshot"}
+          tone={pctTone(diskPct)}
+        />
+        <Kpi
+          label="Containers"
+          value={containersValue}
+          sub={docker?.available ? "Running / total" : "Docker snapshot inactive"}
+          tone={containersTone}
+        />
+      </section>
+
+      {/* Audit / jobs split */}
+      <div className="grid min-w-0 grid-cols-[1.5fr_1fr] gap-6 max-[1000px]:grid-cols-1">
+        <AuditPanel events={overview.auditEvents.slice(0, 5)} compact />
+        <JobsPanel jobs={overview.jobs.slice(0, 5)} compact />
+      </div>
+
+      {/* System panel, 4 cells */}
+      <section
+        className="min-w-0 border border-line bg-panel"
+        aria-label="System details"
+      >
+        <div className="border-b border-line px-4 py-3">
+          <h2 className="text-[14px] font-semibold">System</h2>
+          <p className="mt-0.5 text-[12px] text-dim">
+            Reported facts for this server, no estimates.
+          </p>
         </div>
-        {trend ? (
-          <>
-            <div className="mt-3 flex items-center justify-between gap-2 text-xs font-normal uppercase tracking-[0.08em] text-white/50">
-              <span>Last {range}</span>
-              <span className={isHot ? "text-white/50" : "text-white/50"}>
-                threshold {threshold}%
-              </span>
+        <dl className="grid min-w-0 grid-cols-4 gap-px bg-line max-[1000px]:grid-cols-2">
+          {sysCells.map((cell) => (
+            <div key={cell.label} className="min-w-0 bg-panel p-4">
+              <dt className="truncate text-[11px] uppercase tracking-[0.14em] text-dim">
+                {cell.label}
+              </dt>
+              <dd
+                className="tnum mt-1.5 truncate text-[13px] text-text"
+                title={cell.value}
+              >
+                {cell.value}
+              </dd>
             </div>
-            <svg
-              className="mt-2 h-14 w-full overflow-visible"
-              viewBox="0 0 100 56"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <line
-                x1="0"
-                y1="14"
-                x2="100"
-                y2="14"
-                stroke={isHot ? "#ffffff" : "rgba(255,255,255,0.08)"}
-                strokeDasharray="4 4"
-              />
-              <polyline
-                points={polyline}
-                fill="none"
-                stroke={isHot ? "#ffffff" : stroke}
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <line
-                x1="0"
-                y1="44"
-                x2="100"
-                y2="44"
-                stroke="rgba(255,255,255,0.08)"
-                strokeDasharray="4 4"
-              />
-            </svg>
-            <div className="mt-1 flex items-center justify-between text-sm font-normal leading-6 text-white/50">
-              <span>min {min}%</span>
-              <span>max {max}%</span>
-            </div>
-          </>
-        ) : (
-          <div className="mt-3 rounded-none border border-dashed border-white/10 bg-white/[0.03] px-3 py-4 text-sm font-normal text-white/30">
-            No backend trend data
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          ))}
+        </dl>
+      </section>
+    </div>
   );
 }

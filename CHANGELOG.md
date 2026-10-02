@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — reference dashboard design
+
+- Restyle FlexServer using the supplied VPS Management Dashboard reference: ink/lime palette, compact header, square panels, fleet cards/table, and workspace tabs.
+- Align overview, metrics, Docker monitoring, jobs, audit, terminal, settings, forms, and overlays with shared design tokens while retaining API-backed controls and access restrictions.
+- Keep missing telemetry explicit instead of presenting unrelated metric history as memory or network data.
+
+## Unreleased — CI/CD optimization
+
+- Scope PR checks through a lightweight change-detection job; keep the full verification matrix on main and honor manual force-build inputs.
+- Run database integrations alongside verification, generate SBOMs only for publishable main runs, and avoid redundant standalone Node/Go builds.
+- Transfer checksummed, verified Docker images to publish without rebuilding; verify loaded image identities and deploy the pushed digest references.
+- Fix fail-fast migration asset smoke checks and grant change detection the pull-request read permission it requires.
+
 ## Unreleased — local agent upgrade
 
 - Add signed, immutable agent/updater release manifests with pinned Ed25519 verification, a stable-channel catalog, build IDs, and compatibility checks.

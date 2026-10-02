@@ -9,13 +9,13 @@ export function SummaryPill({
 }) {
   return (
     <div
-      className={`min-w-0 rounded-none border px-3.5 py-3 shadow-none ${tone === "red" ? "border-red-400/25 bg-red-400/[0.06] text-red-100" : tone === "amber" ? "border-amber-400/25 bg-amber-400/[0.05] text-amber-100" : "border-white/10 bg-white/[0.03] text-white/70"}`}
+      className={`min-w-0 rounded-none border bg-panel px-4 py-3 shadow-none ${tone === "red" ? "border-crit/25 text-crit" : tone === "amber" ? "border-warn/25 text-warn" : "border-line text-text"}`}
     >
-      <p className="text-[11px] font-normal uppercase tracking-[0.12em] opacity-75">
+      <p className="text-[11px] font-normal uppercase tracking-[0.14em] text-dim">
         {label}
       </p>
       <p
-        className="mt-1 whitespace-normal break-words text-[15px] font-normal leading-5"
+        className="mt-1 whitespace-normal break-words text-[15px] font-medium leading-5"
         title={value}
       >
         {value}

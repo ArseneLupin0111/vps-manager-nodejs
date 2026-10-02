@@ -28,88 +28,192 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
-  verify:
-    name: Verify
+  changes:
+    name: Detect changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
-      api_changed: ${{ steps.effective.outputs.api_changed }}
-      web_changed: ${{ steps.effective.outputs.web_changed }}
-      agent_changed: ${{ steps.changes.outputs.agent }}
+      full: ${{ steps.scope.outputs.full }}
+      node: ${{ steps.scope.outputs.node }}
+      api: ${{ steps.scope.outputs.api }}
+      web: ${{ steps.scope.outputs.web }}
+      agent: ${{ steps.scope.outputs.agent }}
+      installer: ${{ steps.scope.outputs.installer }}
+      updater: ${{ steps.scope.outputs.updater }}
+      db: ${{ steps.scope.outputs.db }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect image changes
+      - name: Detect changed paths
         id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
+            node:
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig*.json'
+              - 'vitest.config.ts'
+              - 'packages/api/**'
+              - 'packages/web/**'
+              - 'scripts/**'
+              - 'public/**'
             api:
               - 'Dockerfile'
+              - '.dockerignore'
+              - '.github/workflows/ci.yml'
               - 'package.json'
               - 'package-lock.json'
+              - 'tsconfig*.json'
               - 'packages/api/**'
+              - 'packages/web/**'
               - 'packages/agent/**'
-              - 'scripts/build-agent.mjs'
+              - 'scripts/**'
+              - 'public/**'
+              - 'docker/**'
             web:
               - 'Dockerfile'
+              - '.dockerignore'
+              - '.github/workflows/ci.yml'
               - 'package.json'
               - 'package-lock.json'
+              - 'tsconfig*.json'
+              - 'packages/api/**'
               - 'packages/web/**'
+              - 'packages/agent/**'
+              - 'scripts/**'
               - 'public/**'
               - 'docker/**'
             agent:
-              - 'package.json'
-              - 'package-lock.json'
               - 'packages/agent/**'
               - 'scripts/build-agent.mjs'
+              - 'package.json'
+              - 'package-lock.json'
+            installer:
+              - 'scripts/install.sh'
+              - 'scripts/install-local-agent.sh'
+              - 'scripts/tests/test-installer-docker-access.sh'
+              - 'scripts/tests/**'
               - 'Dockerfile'
+              - 'docker-compose.yml'
+              - '.github/workflows/ci.yml'
+            updater:
+              - 'scripts/install.sh'
+              - 'scripts/install-local-agent.sh'
+              - 'scripts/install-updater.sh'
+              - 'scripts/tests/test-updater.sh'
+              - 'packages/agent/**'
+              - 'scripts/tests/**'
+              - 'scripts/release/**'
+              - 'packages/api/src/scripts/bootstrap-local-agent.ts'
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+              - '.github/workflows/ci.yml'
+            db:
+              - 'packages/api/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'vitest.config.ts'
+              - '.github/workflows/ci.yml'
 
-      - name: Compute effective image changes
-        id: effective
+      - name: Compute effective change scope
+        id: scope
         env:
-          API_CHANGED: ${{ steps.changes.outputs.api }}
-          WEB_CHANGED: ${{ steps.changes.outputs.web }}
-          FORCE_API_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_api_build || true }}
-          FORCE_WEB_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_web_build || true }}
+          RAW_NODE: ${{ steps.changes.outputs.node }}
+          RAW_API: ${{ steps.changes.outputs.api }}
+          RAW_WEB: ${{ steps.changes.outputs.web }}
+          RAW_AGENT: ${{ steps.changes.outputs.agent }}
+          RAW_INSTALLER: ${{ steps.changes.outputs.installer }}
+          RAW_UPDATER: ${{ steps.changes.outputs.updater }}
+          RAW_DB: ${{ steps.changes.outputs.db }}
+          FULL: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          FORCE_API: ${{ github.event_name == 'workflow_dispatch' && inputs.force_api_build == true }}
+          FORCE_WEB: ${{ github.event_name == 'workflow_dispatch' && inputs.force_web_build == true }}
         run: |
-          if [ "$API_CHANGED" = "true" ] || [ "$FORCE_API_BUILD" = "true" ]; then
-            echo "api_changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "api_changed=false" >> "$GITHUB_OUTPUT"
-          fi
-          if [ "$WEB_CHANGED" = "true" ] || [ "$FORCE_WEB_BUILD" = "true" ]; then
-            echo "web_changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "web_changed=false" >> "$GITHUB_OUTPUT"
-          fi
+          # refs/heads/main (non-PR) forces the full check matrix and both
+          # image builds. Elsewhere the raw path filters apply, and a
+          # workflow-dispatch force input only ever adds a build: a false
+          # input never forces anything.
+          resolve() {
+            if [ "$FULL" = "true" ] || [ "$1" = "true" ] || [ "$2" = "true" ]; then
+              echo "true"
+            else
+              echo "false"
+            fi
+          }
+          {
+            echo "full=$FULL"
+            echo "node=$(resolve "$RAW_NODE" false)"
+            echo "api=$(resolve "$RAW_API" "$FORCE_API")"
+            echo "web=$(resolve "$RAW_WEB" "$FORCE_WEB")"
+            echo "agent=$(resolve "$RAW_AGENT" false)"
+            echo "installer=$(resolve "$RAW_INSTALLER" false)"
+            echo "updater=$(resolve "$RAW_UPDATER" false)"
+            echo "db=$(resolve "$RAW_DB" false)"
+          } >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
+        # Also pinned when the API image builds: the agent identity step and
+        # the parity check run `node` even when no Node paths changed
+        # (e.g. a Dockerfile-only change).
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' || needs.changes.outputs.api == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
 
       - name: Install Node dependencies
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true'
         run: npm ci
 
       - name: Run Node tests
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true'
         run: npm test
 
       - name: Typecheck Node workspaces
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true'
         run: npm run typecheck
 
       - name: Build Node app
+        # Fallback compile check only when no Docker target builds: both
+        # image targets run the same `npm run build` in their shared build
+        # stage, so a scheduled image build already covers compilation.
+        if: needs.changes.outputs.node == 'true' && needs.changes.outputs.api != 'true' && needs.changes.outputs.web != 'true'
         run: npm run build
 
       - name: Smoke test scripts (--help exits 0, no env required)
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true'
         run: |
           npx tsx scripts/create-agent-token.ts --help
           npx tsx scripts/install-agent-from-env.ts --help
 
       - name: Validate installer hardening
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.installer == 'true'
         run: bash scripts/tests/test-installer-docker-access.sh
+
+      - name: Setup Go
+        # Pinned ahead of the updater check so its scoped Go verification
+        # (vet/test/GOOS=linux build) and the agent race/vet tests share one
+        # cached toolchain instead of the runner's preinstalled Go.
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.agent == 'true' || needs.changes.outputs.updater == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: packages/agent/go.mod
+
       - name: Validate updater bootstrap and unit hardening
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.updater == 'true'
         run: bash scripts/tests/test-updater.sh
 
 
@@ -119,38 +223,33 @@ jobs:
           DASHBOARD_SESSION_SECRET: ci-compose-session-secret-012345678901234567890123
         run: docker compose config --quiet
 
-      - name: Setup Go
-        if: steps.changes.outputs.agent == 'true'
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23.x"
-          cache-dependency-path: packages/agent/go.mod
-
       - name: Test Go agent with race detector
-        if: steps.changes.outputs.agent == 'true'
+        # Race + vet only: the standalone `go build` was redundant (the API
+        # image build and the identity parity check both compile the agent).
+        if: needs.changes.outputs.full == 'true' || needs.changes.outputs.agent == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc
           cd packages/agent
           CGO_ENABLED=1 go test -race ./...
           go vet ./...
-          go build ./cmd/vps-agent
 
       - name: Setup Docker Buildx
-        if: steps.effective.outputs.api_changed == 'true' || steps.effective.outputs.web_changed == 'true'
+        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.web == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Resolve agent build identity
         id: agent-identity
         # Immutable identity shared by the Docker image build, the standalone
         # build, and the parity check below (releaseId/buildId = git SHA).
+        if: needs.changes.outputs.api == 'true'
         run: |
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
           echo "build_id=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Build API Docker image
         id: api-build
-        if: steps.effective.outputs.api_changed == 'true'
+        if: needs.changes.outputs.api == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -161,13 +260,20 @@ jobs:
           build-args: |
             AGENT_VERSION=${{ steps.agent-identity.outputs.version }}
             AGENT_BUILD_ID=${{ steps.agent-identity.outputs.build_id }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=vps-manager-nodejs-api
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Smoke test API runtime migration assets and agent binary
-        if: steps.effective.outputs.api_changed == 'true'
+        # `set -eu` makes the shell abort on the first failed assertion so a
+        # missing asset can never be masked by a later passing check.
+        if: needs.changes.outputs.api == 'true'
         run: |
           docker run --rm --entrypoint sh vps-manager-nodejs-api:ci -lc '
+            set -eu
             test -f /app/dist/db/migrate.js
             test -f /app/dist/scripts/set-dashboard-password.js
             test -f /app/db/migrations/001_core_schema.sql
@@ -184,13 +290,13 @@ jobs:
             test -f /app/db/migrations/012_vps_location.sql
             test -f /app/db/migrations/013_docker_monitoring.sql
             test -f /app/db/migrations/014_docker_ingest.sql
-            test -f /app/db/migrations/015_docker_rollups.sql
+            test -f /app/db/migrations/015_docker_metric_rollup_metric_name.sql
             test -f /app/db/migrations/016_docker_alert_resolution.sql
             test -x /app/agent/vps-agent-linux-amd64
           '
 
       - name: Parity check agent identity (image vs standalone)
-        if: steps.changes.outputs.agent == 'true' && steps.effective.outputs.api_changed == 'true'
+        if: needs.changes.outputs.agent == 'true' && needs.changes.outputs.api == 'true'
         run: |
           AGENT_VERSION="${{ steps.agent-identity.outputs.version }}" \
           AGENT_BUILD_ID="${{ steps.agent-identity.outputs.build_id }}" \
@@ -212,7 +318,7 @@ jobs:
 
       - name: Build web Docker image
         id: web-build
-        if: steps.effective.outputs.web_changed == 'true'
+        if: needs.changes.outputs.web == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -220,6 +326,10 @@ jobs:
           push: false
           load: true
           tags: vps-manager-nodejs-web:ci
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=vps-manager-nodejs-web
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -232,7 +342,7 @@ jobs:
       - name: Assert no Docker socket in built image metadata (supplemental)
         # Supplemental only: image config cannot carry a host bind-mount, but
         # keep this as defense-in-depth alongside the Compose-surface guard.
-        if: steps.effective.outputs.api_changed == 'true' || steps.effective.outputs.web_changed == 'true'
+        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.web == 'true'
         run: |
           check_image() {
             image="$1"
@@ -241,10 +351,10 @@ jobs:
               exit 1
             fi
           }
-          if [ "${{ steps.effective.outputs.api_changed }}" = "true" ]; then
+          if [ "${{ needs.changes.outputs.api }}" = "true" ]; then
             check_image vps-manager-nodejs-api:ci
           fi
-          if [ "${{ steps.effective.outputs.web_changed }}" = "true" ]; then
+          if [ "${{ needs.changes.outputs.web }}" = "true" ]; then
             check_image vps-manager-nodejs-web:ci
           fi
           echo "No Docker socket references in built API/web image metadata."
@@ -254,7 +364,7 @@ jobs:
         # run even if this image has findings; the final gate below fails.
         # Scan only images successfully built in this job; a failed prerequisite
         # already fails verification and must not trigger a registry fallback.
-        if: (success() || failure()) && steps.effective.outputs.api_changed == 'true' && steps['api-build'].outcome == 'success'
+        if: (success() || failure()) && needs.changes.outputs.api == 'true' && steps['api-build'].outcome == 'success'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -269,7 +379,7 @@ jobs:
       - name: Scan web image for critical fixable vulnerabilities
         # A failed API scan is itself a release failure, not a reason to skip
         # the independent web scan.
-        if: (success() || failure()) && steps.effective.outputs.web_changed == 'true' && steps['web-build'].outcome == 'success'
+        if: (success() || failure()) && needs.changes.outputs.web == 'true' && steps['web-build'].outcome == 'success'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -282,7 +392,9 @@ jobs:
           exit-code: "0"
 
       - name: Generate SBOM for API image
-        if: (success() || failure()) && steps.effective.outputs.api_changed == 'true' && steps['api-build'].outcome == 'success'
+        # SBOMs are release attestations: generate them only on runs that can
+        # publish (non-PR main). Trivy scans and the gate still cover PRs.
+        if: (success() || failure()) && needs.changes.outputs.api == 'true' && steps['api-build'].outcome == 'success' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: anchore/sbom-action@v0
         with:
           image: vps-manager-nodejs-api:ci
@@ -290,7 +402,7 @@ jobs:
           output-file: sbom-api.spdx.json
 
       - name: Generate SBOM for web image
-        if: (success() || failure()) && steps.effective.outputs.web_changed == 'true' && steps['web-build'].outcome == 'success'
+        if: (success() || failure()) && needs.changes.outputs.web == 'true' && steps['web-build'].outcome == 'success' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: anchore/sbom-action@v0
         with:
           image: vps-manager-nodejs-web:ci
@@ -298,7 +410,7 @@ jobs:
           output-file: sbom-web.spdx.json
 
       - name: Upload security artifacts
-        if: always() && (steps.effective.outputs.api_changed == 'true' || steps.effective.outputs.web_changed == 'true')
+        if: always() && (needs.changes.outputs.api == 'true' || needs.changes.outputs.web == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: image-security-${{ github.sha }}
@@ -316,17 +428,45 @@ jobs:
         # fails the job if either report contains a fixable CRITICAL finding.
         # Always run and assert the expected reports exist so a skipped or
         # missing scan can never silently pass the release gate.
-        if: always() && (steps.effective.outputs.api_changed == 'true' || steps.effective.outputs.web_changed == 'true')
+        if: always() && (needs.changes.outputs.api == 'true' || needs.changes.outputs.web == 'true')
         env:
-          EXPECT_API: ${{ steps.effective.outputs.api_changed }}
-          EXPECT_WEB: ${{ steps.effective.outputs.web_changed }}
+          EXPECT_API: ${{ needs.changes.outputs.api }}
+          EXPECT_WEB: ${{ needs.changes.outputs.web }}
         run: |
           normalize() { [ "$1" = "true" ] && echo 1 || echo 0; }
           EXPECT_API="$(normalize "$EXPECT_API")" EXPECT_WEB="$(normalize "$EXPECT_WEB")" node scripts/ci/gate-trivy-critical.mjs
 
+      - name: Save verified images for publishing
+        # Only on publishable main runs, and only after every gate above
+        # passed (implicit success()): both loaded images go into one archive
+        # with a sha256 checksum and the image IDs that were just scanned.
+        if: needs.changes.outputs.full == 'true'
+        run: |
+          docker save --output verified-images.tar vps-manager-nodejs-api:ci vps-manager-nodejs-web:ci
+          sha256sum verified-images.tar > verified-images.tar.sha256
+          {
+            echo "api=$(docker image inspect --format '{{.Id}}' vps-manager-nodejs-api:ci)"
+            echo "web=$(docker image inspect --format '{{.Id}}' vps-manager-nodejs-web:ci)"
+          } > verified-image-ids.txt
+
+      - name: Upload verified images
+        if: needs.changes.outputs.full == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-images-${{ github.sha }}
+          path: |
+            verified-images.tar
+            verified-images.tar.sha256
+            verified-image-ids.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   postgres-integration:
     name: TimescaleDB PostgreSQL migration integration
-    needs: verify
+    # Runs concurrently with verify: only change detection gates it.
+    needs: changes
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -357,7 +497,8 @@ jobs:
 
   docker-monitoring-postgres16:
     name: Docker monitoring PostgreSQL 16
-    needs: verify
+    needs: changes
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -390,7 +531,17 @@ jobs:
     name: Publish Docker image
     needs: [verify, postgres-integration, docker-monitoring-postgres16]
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    # always() makes the explicit needs results authoritative. On main all
+    # three jobs are forced to run (full scope), so publish requires all of
+    # them to succeed; a failed or skipped gate fails closed (publish skips,
+    # deploy never sees unverified images).
+    if: >-
+      always() &&
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' &&
+      needs.verify.result == 'success' &&
+      needs.postgres-integration.result == 'success' &&
+      needs.docker-monitoring-postgres16.result == 'success'
     permissions:
       contents: read
       packages: write
@@ -399,18 +550,39 @@ jobs:
       api_sha_tag: ${{ steps.meta.outputs.api_sha_tag }}
       web_image: ${{ steps.meta.outputs.web_image }}
       web_sha_tag: ${{ steps.meta.outputs.web_sha_tag }}
-      api_digest: ${{ steps.api-build.outputs.digest }}
-      web_digest: ${{ steps.web-build.outputs.digest }}
+      api_digest: ${{ steps.push.outputs.api_digest }}
+      web_digest: ${{ steps.push.outputs.web_digest }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download verified images
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-images-${{ github.sha }}
+          path: .ci-images
+
+      - name: Verify checksum and load verified images
+        # Fail closed if the archive bytes changed after the verify gates,
+        # then prove the loaded image IDs are the exact images that were
+        # scanned, gated, and saved in verify (no rebuild happens here).
+        run: |
+          set -eu
+          cd .ci-images
+          sha256sum --check verified-images.tar.sha256
+          docker load --input verified-images.tar
+          . ./verified-image-ids.txt
+          API_ID="$(docker image inspect --format '{{.Id}}' vps-manager-nodejs-api:ci)"
+          WEB_ID="$(docker image inspect --format '{{.Id}}' vps-manager-nodejs-web:ci)"
+          test "$API_ID" = "$api"
+          test "$WEB_ID" = "$web"
+          echo "loaded verified images: api=$API_ID web=$WEB_ID"
 
       - name: Docker metadata
         id: meta
         # Every main run publishes BOTH images pinned to the current commit
-        # SHA, even when path filters saw no change. Path filters only skip
-        # redundant verification builds on PRs; releases are always immutable
-        # and rollback-reproducible (redeploy a prior SHA tag).
+        # SHA, even when path filters saw no change. The images are the exact
+        # ones built, scanned, and gated in verify (transferred via artifact;
+        # this job never rebuilds). SHA tags stay immutable and
+        # rollback-reproducible (redeploy a prior SHA tag); deploy pulls the
+        # digest references recorded after the push.
         run: |
           BASE_IMAGE="${IMAGE_NAME,,}"
           API_IMAGE="${BASE_IMAGE}-api"
@@ -430,9 +602,6 @@ jobs:
             echo "WEB_SHA_TAG=$WEB_SHA_TAG"
           } >> "$GITHUB_ENV"
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -440,44 +609,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Resolve agent build identity
-        id: agent-identity
+      - name: Tag and push verified images
+        id: push
         run: |
-          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-          echo "build_id=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push API Docker image
-        id: api-build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: api-runtime
-          push: true
-          tags: ${{ env.API_SHA_TAG }}
-          build-args: |
-            AGENT_VERSION=${{ steps.agent-identity.outputs.version }}
-            AGENT_BUILD_ID=${{ steps.agent-identity.outputs.build_id }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.title=vps-manager-nodejs-api
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push web Docker image
-        id: web-build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: web-runtime
-          push: true
-          tags: ${{ env.WEB_SHA_TAG }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.title=vps-manager-nodejs-web
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          set -eu
+          docker tag vps-manager-nodejs-api:ci "$API_SHA_TAG"
+          docker tag vps-manager-nodejs-web:ci "$WEB_SHA_TAG"
+          docker push "$API_SHA_TAG"
+          docker push "$WEB_SHA_TAG"
+          # RepoDigests exists only after the push; record the immutable
+          # name@digest references that deploy pulls by.
+          API_DIGEST="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$API_SHA_TAG" | grep -F "$API_IMAGE@" | head -n 1)"
+          WEB_DIGEST="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$WEB_SHA_TAG" | grep -F "$WEB_IMAGE@" | head -n 1)"
+          test -n "$API_DIGEST"
+          test -n "$WEB_DIGEST"
+          {
+            echo "api_digest=$API_DIGEST"
+            echo "web_digest=$WEB_DIGEST"
+          } >> "$GITHUB_OUTPUT"
+          echo "pushed $API_SHA_TAG -> $API_DIGEST"
+          echo "pushed $WEB_SHA_TAG -> $WEB_DIGEST"
 
   deploy:
     name: Deploy over SSH
@@ -536,8 +687,8 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           DEPLOY_PATH: ${{ steps.config.outputs.deploy_path }}
-          API_IMAGE: ${{ needs.publish.outputs.api_sha_tag }}
-          WEB_IMAGE: ${{ needs.publish.outputs.web_sha_tag }}
+          API_IMAGE: ${{ needs.publish.outputs.api_digest }}
+          WEB_IMAGE: ${{ needs.publish.outputs.web_digest }}
           DASHBOARD_SESSION_SECRET: ${{ secrets.DASHBOARD_SESSION_SECRET }}
           DASHBOARD_ADMIN_PASSWORD: ${{ secrets.DASHBOARD_ADMIN_PASSWORD }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}

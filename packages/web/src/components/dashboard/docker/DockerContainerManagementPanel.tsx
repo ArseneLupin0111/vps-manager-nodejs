@@ -270,14 +270,16 @@ export function DockerContainerManagementPanel({
     return (
       <section
         aria-label="Docker container management"
-        className="rounded-none border border-white/10 bg-black/10 p-4"
+        className="border border-line bg-panel"
       >
-        <h3 className="text-xs font-medium text-white/75">
-          Container management
-        </h3>
-        <p className="mt-1 text-[11px] leading-relaxed text-white/45">
-          Management controls stay hidden until Docker management is enabled.
-        </p>
+        <header className="border-b border-line px-4 py-3">
+          <h3 className="text-[14px] font-semibold">Container management</h3>
+        </header>
+        <div className="p-4">
+          <p className="text-[12px] leading-relaxed text-dim">
+            Management controls stay hidden until Docker management is enabled.
+          </p>
+        </div>
       </section>
     );
   }
@@ -287,14 +289,16 @@ export function DockerContainerManagementPanel({
       <section
         aria-label="Docker container management"
         aria-busy="true"
-        className="rounded-none border border-white/10 bg-black/10 p-4"
+        className="border border-line bg-panel"
       >
-        <h3 className="text-xs font-medium text-white/75">
-          Container management
-        </h3>
-        <p className="mt-1 text-[11px] text-white/50">
-          Checking container management capability…
-        </p>
+        <header className="border-b border-line px-4 py-3">
+          <h3 className="text-[14px] font-semibold">Container management</h3>
+        </header>
+        <div className="p-4">
+          <p className="text-[12px] text-dim">
+            Checking container management capability…
+          </p>
+        </div>
       </section>
     );
   }
@@ -303,26 +307,28 @@ export function DockerContainerManagementPanel({
     return (
       <section
         aria-label="Docker container management"
-        className="rounded-none border border-white/10 bg-black/10 p-4"
+        className="border border-line bg-panel"
       >
-        <h3 className="text-xs font-medium text-white/75">
-          Container management
-        </h3>
-        <p className="mt-1 text-[11px] text-white/60">
-          Container management status is unknown right now.
-        </p>
-        {capabilityError ? (
-          <p className="mt-1 text-[11px] text-white/40">{capabilityError}</p>
-        ) : null}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="mt-3 min-h-9"
-          onClick={() => setCapabilityRetry((n) => n + 1)}
-        >
-          Retry capability check
-        </Button>
+        <header className="border-b border-line px-4 py-3">
+          <h3 className="text-[14px] font-semibold">Container management</h3>
+        </header>
+        <div className="p-4">
+          <p className="text-[12px] text-text">
+            Container management status is unknown right now.
+          </p>
+          {capabilityError ? (
+            <p className="mt-1 text-[11px] text-dim">{capabilityError}</p>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mt-3"
+            onClick={() => setCapabilityRetry((n) => n + 1)}
+          >
+            Retry capability check
+          </Button>
+        </div>
       </section>
     );
   }
@@ -331,17 +337,19 @@ export function DockerContainerManagementPanel({
     return (
       <section
         aria-label="Docker container management"
-        className="rounded-none border border-white/10 bg-black/10 p-4"
+        className="border border-line bg-panel"
       >
-        <h3 className="text-xs font-medium text-white/75">
-          Container management
-        </h3>
-        <p className="mt-1 text-[11px] text-white/60">
-          Container management is not supported by this agent.
-        </p>
-        {capability.reason ? (
-          <p className="mt-1 text-[11px] text-white/40">{capability.reason}</p>
-        ) : null}
+        <header className="border-b border-line px-4 py-3">
+          <h3 className="text-[14px] font-semibold">Container management</h3>
+        </header>
+        <div className="p-4">
+          <p className="text-[12px] text-text">
+            Container management is not supported by this agent.
+          </p>
+          {capability.reason ? (
+            <p className="mt-1 text-[11px] text-dim">{capability.reason}</p>
+          ) : null}
+        </div>
       </section>
     );
   }
@@ -353,22 +361,23 @@ export function DockerContainerManagementPanel({
   return (
     <section
       aria-label="Docker container management"
-      className="rounded-none border border-white/10 bg-black/10 p-4"
+      className="border border-line bg-panel"
     >
-      <h3 className="text-xs font-medium text-white/75">
-        Container management
-      </h3>
-      <p className="mt-1 text-[11px] leading-relaxed text-white/40">
-        Capability: {capability.actions.join(", ") || "no actions"} · logs{" "}
-        {capability.logsSupported ? "supported" : "not supported"} (max{" "}
-        {effectiveMaxLines} lines). Target a single container below; every
-        action asks for confirmation first.
-      </p>
+      <header className="border-b border-line px-4 py-3">
+        <h3 className="text-[14px] font-semibold">Container management</h3>
+        <p className="mt-0.5 text-[12px] text-dim">
+          Capability: {capability.actions.join(", ") || "no actions"} · logs{" "}
+          {capability.logsSupported ? "supported" : "not supported"} (max{" "}
+          {effectiveMaxLines} lines). Target a single container below; every
+          action asks for confirmation first.
+        </p>
+      </header>
 
-      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="p-4">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <label
-            className="mb-1 block text-[11px] text-white/50"
+            className="mb-1 block text-[11px] text-dim"
             htmlFor={`docker-management-target-${vpsId}`}
           >
             Target container
@@ -379,7 +388,7 @@ export function DockerContainerManagementPanel({
             onChange={(event) =>
               setTargetKey(event.target.value || null)
             }
-            className="h-9 w-full rounded-sm border border-white/10 bg-slate-900 px-2 text-[12px] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60"
+            className="h-8 w-full border border-line bg-ink px-2 text-[12px] text-text focus:border-signal focus:outline-none"
           >
             <option value="">Select a container…</option>
             {containers.map((container) => (
@@ -389,12 +398,12 @@ export function DockerContainerManagementPanel({
             ))}
           </select>
           {selected ? (
-            <p className="mt-1 truncate text-[11px] text-white/40">
+            <p className="mt-1 truncate text-[11px] text-dim">
               Target: {selected.name} · key {selected.containerKey} ·{" "}
               {selected.image} · {selected.state}
             </p>
           ) : (
-            <p className="mt-1 text-[11px] text-white/40">
+            <p className="mt-1 text-[11px] text-dim">
               Select a target container to enable start, stop, and restart.
             </p>
           )}
@@ -406,7 +415,7 @@ export function DockerContainerManagementPanel({
               type="button"
               size="sm"
               variant={action === "stop" ? "destructive" : "secondary"}
-              className="min-h-9 capitalize"
+              className="capitalize"
               disabled={
                 actionDisabled || !capability.actions.includes(action)
               }
@@ -420,9 +429,9 @@ export function DockerContainerManagementPanel({
 
       <div
         aria-live="polite"
-        className="mt-3 rounded-none border border-white/10 bg-black/20 px-3 py-2"
+        className="mt-3 border border-line bg-raised px-3 py-2"
       >
-        <p className="text-[11px] font-medium text-white/70">
+        <p className="text-[11px] font-medium text-text">
           Operation status:{" "}
           {operationState.error && !visibleOperation
             ? "unknown"
@@ -430,7 +439,7 @@ export function DockerContainerManagementPanel({
         </p>
         {visibleOperation ? (
           <>
-            <p className="mt-1 text-[11px] text-white/50">
+            <p className="mt-1 text-[11px] text-dim">
               {visibleOperation.action} · {visibleOperation.target.containerKey} ·
               requested {new Date(visibleOperation.createdAt).toLocaleString()}
               {visibleOperation.updatedAt
@@ -439,12 +448,12 @@ export function DockerContainerManagementPanel({
             </p>
             {visibleOperation.status === "failed" &&
             visibleOperation.result?.message ? (
-              <p role="alert" className="mt-1 text-[11px] text-rose-200">
+              <p role="alert" className="mt-1 text-[11px] text-crit">
                 {visibleOperation.result.message}
               </p>
             ) : null}
             {visibleOperation.cancelReason ? (
-              <p className="mt-1 text-[11px] text-white/40">
+              <p className="mt-1 text-[11px] text-dim">
                 Cancel reason: {visibleOperation.cancelReason}
               </p>
             ) : null}
@@ -453,7 +462,6 @@ export function DockerContainerManagementPanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="min-h-9"
                 disabled={operationState.checking}
                 onClick={() => void checkOperationStatus()}
               >
@@ -464,24 +472,24 @@ export function DockerContainerManagementPanel({
             </div>
           </>
         ) : (
-          <p className="mt-1 text-[11px] text-white/40">
+          <p className="mt-1 text-[11px] text-dim">
             No operation for this target yet. Confirm an action above, then
             check status manually. Live updates never change this status
             automatically.
           </p>
         )}
         {operationState.error ? (
-          <p role="alert" className="mt-1 text-[11px] text-rose-200">
+          <p role="alert" className="mt-1 text-[11px] text-crit">
             {operationState.error}
           </p>
         ) : null}
       </div>
 
-      <div className="mt-3 border-t border-white/10 pt-3">
+      <div className="mt-3 border-t border-line pt-3">
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-end">
           <div>
             <label
-              className="mb-1 block text-[11px] text-white/50"
+              className="mb-1 block text-[11px] text-dim"
               htmlFor={`docker-management-lines-${vpsId}`}
             >
               Log lines (separate setting, 1–{effectiveMaxLines})
@@ -495,7 +503,7 @@ export function DockerContainerManagementPanel({
               onChange={(event) =>
                 setLogLinesSetting(Number(event.target.value))
               }
-              className="h-9 w-full rounded-sm border border-white/10 bg-black/20 px-2 text-[12px] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60"
+              className="tnum h-8 w-full border border-line bg-ink px-2 text-[12px] text-text focus:border-signal focus:outline-none"
             />
           </div>
           <div className="flex flex-wrap gap-2 sm:justify-end">
@@ -503,7 +511,6 @@ export function DockerContainerManagementPanel({
               type="button"
               size="sm"
               variant="secondary"
-              className="min-h-9"
               disabled={
                 !selected ||
                 !capability.logsSupported ||
@@ -521,7 +528,6 @@ export function DockerContainerManagementPanel({
               type="button"
               size="sm"
               variant="ghost"
-              className="min-h-9"
               disabled={!logLines.length && !logsError}
               onClick={clearLogs}
             >
@@ -530,27 +536,27 @@ export function DockerContainerManagementPanel({
           </div>
         </div>
         {!capability.logsSupported ? (
-          <p className="mt-2 text-[11px] text-white/40">
+          <p className="mt-2 text-[11px] text-dim">
             Log retrieval is not supported by this agent.
           </p>
         ) : null}
         {logsError ? (
-          <p role="alert" className="mt-2 text-[11px] text-rose-200">
+          <p role="alert" className="mt-2 text-[11px] text-crit">
             {logsError}
           </p>
         ) : null}
         {logLines.length ? (
           <>
-            <p className="mt-2 text-[11px] text-white/40">
+            <p className="mt-2 text-[11px] text-dim">
               Showing {logLines.length} bounded lines
               {logsTruncated ? " · output was truncated" : ""}. Text only.
             </p>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-none border border-white/10 bg-black/40 p-3 text-[11px] leading-relaxed text-white/75">
+            <pre className="tnum mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words border border-line bg-ink p-4 text-[12px] leading-5 text-dim">
               {logLines.join("\n")}
             </pre>
           </>
         ) : (
-          <p className="mt-2 text-[11px] text-white/40">
+          <p className="mt-2 text-[11px] text-dim">
             Logs load only when requested and never refresh automatically.
           </p>
         )}
@@ -605,6 +611,7 @@ export function DockerContainerManagementPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </div>
     </section>
   );
 }
