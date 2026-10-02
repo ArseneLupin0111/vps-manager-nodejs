@@ -4,6 +4,16 @@ export default {
   theme: {
     extend: {
       colors: {
+        ink: "hsl(var(--ink) / <alpha-value>)",
+        panel: "hsl(var(--panel) / <alpha-value>)",
+        raised: "hsl(var(--raised) / <alpha-value>)",
+        line: "hsl(var(--line) / <alpha-value>)",
+        dim: "hsl(var(--dim) / <alpha-value>)",
+        text: "hsl(var(--text) / <alpha-value>)",
+        signal: "hsl(var(--signal) / <alpha-value>)",
+        warn: "hsl(var(--warn) / <alpha-value>)",
+        crit: "hsl(var(--crit) / <alpha-value>)",
+        info: "hsl(var(--info) / <alpha-value>)",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -42,16 +52,16 @@ export default {
       boxShadow: { panel: "var(--shadow-panel)" },
       fontFamily: {
         display: [
-          "Geist",
-          "Arial",
+          "Instrument Sans",
+          "Segoe UI",
           "Apple Color Emoji",
           "Segoe UI Emoji",
           "Segoe UI Symbol",
           "sans-serif",
         ],
         body: [
-          "Geist",
-          "Arial",
+          "Instrument Sans",
+          "Segoe UI",
           "Apple Color Emoji",
           "Segoe UI Emoji",
           "Segoe UI Symbol",

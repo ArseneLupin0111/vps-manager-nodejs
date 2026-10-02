@@ -34,7 +34,7 @@ import {
 } from "../lib/api";
 import { subscribeMonitoring } from "../lib/live-api";
 import { useDashboard } from "./DashboardContext";
-import { vpsDisplayName } from "../lib/dashboard-formatters";
+import { serverStatusLabel, vpsDisplayName } from "../lib/dashboard-formatters";
 import { DockerMetricsPanel } from "../components/dashboard/servers/DockerMetricsPanel";
 import { DockerCapabilityNotice } from "../components/dashboard/docker/DockerCapabilityNotice";
 import { DockerHistoryChart } from "../components/dashboard/docker/DockerHistoryChart";
@@ -161,9 +161,7 @@ export function VpsWorkspaceLayout() {
   if (!ctx.loaded) {
     return (
       <div className="flex items-center justify-center p-12">
-        <div className="text-sm font-normal text-white/50">
-          Loading VPS workspace...
-        </div>
+        <div className="text-[13px] text-dim">Loading VPS workspace...</div>
       </div>
     );
   }
@@ -171,7 +169,7 @@ export function VpsWorkspaceLayout() {
   // Not-found state
   const vps = ctx.records.find((record) => record.id === vpsId);
   if (!vps || !vpsId) {
-    return <div className="p-6 text-white/50">VPS not found.</div>;
+    return <div className="p-6 text-dim">VPS not found.</div>;
   }
   const displayName = vpsDisplayName(vps);
 
@@ -226,66 +224,87 @@ export function VpsWorkspaceLayout() {
 
   return (
     <VpsWorkspaceContext.Provider value={workspaceValue}>
-      <div className="min-w-0 space-y-5">
-        <header className="min-w-0 border-b border-white/10">
-          <Link
-            to="/vps"
-            className="inline-flex min-h-10 items-center gap-2 text-sm text-white/50 transition hover:text-white"
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
-            Back to servers
-          </Link>
+      <div className="min-w-0">
+        <Link
+          to="/vps"
+          className="inline-flex min-h-8 items-center gap-1.5 text-[13px] text-dim transition-colors hover:text-text focus-visible:outline-2 focus-visible:outline-signal"
+        >
+          <ArrowLeft size={14} aria-hidden="true" />
+          Server list
+        </Link>
 
-          <div className="flex min-w-0 items-start gap-3 pb-4 pt-2 sm:items-center sm:pb-5">
-            <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center border border-white/10 bg-white/[0.03] text-white sm:mt-0 sm:h-11 sm:w-11">
-              <Server size={19} aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                <h1 className="min-w-0 truncate font-display text-xl font-normal text-white sm:text-2xl">
-                  {displayName}
-                </h1>
-                <span className="inline-flex shrink-0 items-center gap-1.5 text-xs uppercase tracking-[0.08em] text-white/60">
-                  <span className="h-1.5 w-1.5 bg-white/70" />
-                  {vps.status || "Unknown"}
-                </span>
-              </div>
-              <p className="mt-1 truncate font-mono text-xs text-white/50 sm:text-sm">
-                {vps.username}@{vps.host}:{vps.port}
-              </p>
+        <div className="mt-4 flex min-w-0 items-center gap-4">
+          <span className="grid h-12 w-12 shrink-0 place-items-center border border-line bg-panel text-dim">
+            <Server size={22} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-text">
+                {displayName}
+              </h1>
+              <WorkspaceStatusBadge status={vps.status} />
+            </div>
+            <div className="tnum truncate text-[13px] text-dim">
+              {vps.username}@{vps.host}:{vps.port}
             </div>
           </div>
+        </div>
 
-          <div className="-mx-3 overflow-x-auto px-3 [scrollbar-width:thin] sm:-mx-5 sm:px-5 xl:-mx-8 xl:px-8">
-            <nav
-              aria-label={`${displayName} workspace sections`}
-              className="flex w-max min-w-full items-center gap-1"
-            >
-              {workspaceSubPages.map((page) => (
-                <NavLink
-                  key={page.to || "overview"}
-                  end={page.end}
-                  to={page.to || ""}
-                  className={({ isActive }) =>
-                    `inline-flex min-h-11 shrink-0 items-center border-b-2 px-3 text-xs font-normal uppercase tracking-[0.08em] transition sm:px-4 ${
-                      isActive
-                        ? "border-white text-white"
-                        : "border-transparent text-white/50 hover:border-white/20 hover:text-white"
-                    }`
-                  }
-                >
-                  {page.label}
-                </NavLink>
-              ))}
-            </nav>
-          </div>
-        </header>
+        <div className="mt-6 overflow-x-auto border-b border-line [scrollbar-width:thin]">
+          <nav
+            aria-label={`${displayName} workspace sections`}
+            className="flex w-max min-w-full items-center"
+          >
+            {workspaceSubPages.map((page) => (
+              <NavLink
+                key={page.to || "overview"}
+                end={page.end}
+                to={page.to || ""}
+                className={({ isActive }) =>
+                  [
+                    "-mb-px inline-flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-4 py-3 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal",
+                    isActive
+                      ? "border-signal text-text"
+                      : "border-transparent text-dim hover:text-text",
+                  ].join(" ")
+                }
+              >
+                {page.label}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
 
-        <div className="min-w-0">
+        <div className="mt-5 min-w-0">
           <Outlet />
         </div>
       </div>
     </VpsWorkspaceContext.Provider>
+  );
+}
+
+function WorkspaceStatusBadge({ status }: { status?: VpsRecord["status"] }) {
+  const tone =
+    status === "healthy"
+      ? "border-signal/40 bg-signal/10 text-signal"
+      : status === "warning"
+        ? "border-warn/40 bg-warn/10 text-warn"
+        : status === "unreachable"
+          ? "border-crit/40 bg-crit/10 text-crit"
+          : "border-line bg-raised text-dim";
+  const label = serverStatusLabel(status);
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 border px-2 py-0.5 text-[11px] font-medium ${tone}`}
+    >
+      <i
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 rounded-full bg-current ${
+          status === "healthy" ? "pulse" : ""
+        }`}
+      />
+      {label}
+    </span>
   );
 }
 
@@ -479,16 +498,16 @@ export function VpsWorkspaceDockerPage() {
   return (
     <section aria-labelledby="server-docker-heading" className="min-w-0">
       <div className="mb-5 max-w-2xl">
-        <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-sky-300/80">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-dim">
           Workloads
         </p>
         <h2
           id="server-docker-heading"
-          className="font-display text-xl font-normal text-white sm:text-2xl"
+          className="text-xl font-semibold tracking-tight text-text sm:text-2xl"
         >
           Docker monitoring
         </h2>
-        <p className="mt-1.5 text-sm leading-6 text-white/50">
+        <p className="mt-1.5 text-sm leading-6 text-dim">
           Container health and resource use reported by this server.
         </p>
       </div>
@@ -507,22 +526,22 @@ export function VpsWorkspaceDockerPage() {
         />
         {monitoringEnabled ? (
           <>
-            <DockerHistoryChart samples={history} rollups={rollups} retained={historyTotal} loading={loading} error={resourceErrors.history} />{resourcePages.history?.hasMore ? <button type="button" onClick={() => loadMore("history")} disabled={loadingMore === "history"} className="text-xs text-sky-200 underline">{loadingMore === "history" ? "Loading…" : "Load more history"}</button> : null}{resourcePages.rollups?.hasMore ? <button type="button" onClick={() => loadMore("rollups")} disabled={loadingMore === "rollups"} className="ml-3 text-xs text-sky-200 underline">{loadingMore === "rollups" ? "Loading…" : "Load more rollups"}</button> : null}
-            <section aria-label="Container history" className="rounded-none border border-white/10 bg-black/10 p-4">
-              <h3 className="text-xs font-medium text-white/75">Container history</h3>
+            <DockerHistoryChart samples={history} rollups={rollups} retained={historyTotal} loading={loading} error={resourceErrors.history} />{resourcePages.history?.hasMore ? <button type="button" onClick={() => loadMore("history")} disabled={loadingMore === "history"} className="text-xs text-signal underline">{loadingMore === "history" ? "Loading…" : "Load more history"}</button> : null}{resourcePages.rollups?.hasMore ? <button type="button" onClick={() => loadMore("rollups")} disabled={loadingMore === "rollups"} className="ml-3 text-xs text-signal underline">{loadingMore === "rollups" ? "Loading…" : "Load more rollups"}</button> : null}
+            <section aria-label="Container history" className="border border-line bg-panel p-4">
+              <h3 className="text-xs font-medium text-text">Container history</h3>
               {currentTargets.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-2">{currentTargets.map((target) => <button key={target.containerKey} type="button" title={target.containerKey} className={`border px-2 py-1 text-[11px] ${selectedContainer === target.containerKey ? "border-sky-300 text-sky-200" : "border-white/10 text-white/60"}`} onClick={() => setSelectedContainer(selectedContainer === target.containerKey ? null : target.containerKey)}>{target.name ?? target.containerKey.slice(0, 12)}</button>)}</div>
+                <div className="mt-2 flex flex-wrap gap-2">{currentTargets.map((target) => <button key={target.containerKey} type="button" title={target.containerKey} className={`border px-2 py-1 text-[11px] ${selectedContainer === target.containerKey ? "border-signal text-signal" : "border-line text-dim"}`} onClick={() => setSelectedContainer(selectedContainer === target.containerKey ? null : target.containerKey)}>{target.name ?? target.containerKey.slice(0, 12)}</button>)}</div>
               ) : currentContainersError ? (
-                <p className="mt-2 text-[11px] text-red-300">{currentContainersError}</p>
+                <p className="mt-2 text-[11px] text-crit">{currentContainersError}</p>
               ) : currentContainersLoading ? (
-                <p className="mt-2 text-[11px] text-white/40">Loading containers…</p>
+                <p className="mt-2 text-[11px] text-dim">Loading containers…</p>
               ) : (
-                <p className="mt-2 text-[11px] text-white/40">No containers reported for this server.</p>
+                <p className="mt-2 text-[11px] text-dim">No containers reported for this server.</p>
               )}
-              {selectedTarget ? <DockerHistoryChart samples={containerHistory} retained={containerHistory.length} loading={containerHistoryLoading} error={containerHistoryError} /> : <p className="mt-2 text-[11px] text-white/40">Select a container to load its retained history.</p>}
+              {selectedTarget ? <DockerHistoryChart samples={containerHistory} retained={containerHistory.length} loading={containerHistoryLoading} error={containerHistoryError} /> : <p className="mt-2 text-[11px] text-dim">Select a container to load its retained history.</p>}
             </section>
-            <DockerEventTimeline events={events} retained={eventsTotal} loading={loading} error={resourceErrors.events} />{resourcePages.events?.hasMore ? <button type="button" onClick={() => loadMore("events")} disabled={loadingMore === "events"} className="text-xs text-sky-200 underline">{loadingMore === "events" ? "Loading…" : "Load more events"}</button> : null}
-            <DockerAlertsPanel alerts={alerts} retained={alertsTotal} loading={loading} error={resourceErrors.alerts} vpsId={vps.id} onAcknowledged={(updated) => setAlerts((current) => current.map((alert) => alert.id === updated.id ? updated : alert))} />{resourcePages.alerts?.hasMore ? <button type="button" onClick={() => loadMore("alerts")} disabled={loadingMore === "alerts"} className="text-xs text-sky-200 underline">{loadingMore === "alerts" ? "Loading…" : "Load more alerts"}</button> : null}
+            <DockerEventTimeline events={events} retained={eventsTotal} loading={loading} error={resourceErrors.events} />{resourcePages.events?.hasMore ? <button type="button" onClick={() => loadMore("events")} disabled={loadingMore === "events"} className="text-xs text-signal underline">{loadingMore === "events" ? "Loading…" : "Load more events"}</button> : null}
+            <DockerAlertsPanel alerts={alerts} retained={alertsTotal} loading={loading} error={resourceErrors.alerts} vpsId={vps.id} onAcknowledged={(updated) => setAlerts((current) => current.map((alert) => alert.id === updated.id ? updated : alert))} />{resourcePages.alerts?.hasMore ? <button type="button" onClick={() => loadMore("alerts")} disabled={loadingMore === "alerts"} className="text-xs text-signal underline">{loadingMore === "alerts" ? "Loading…" : "Load more alerts"}</button> : null}
             <DockerStorageOverview storage={storage} loading={loading} error={resourceErrors.storage} />
           </>
         ) : null}
@@ -535,7 +554,7 @@ export function VpsWorkspaceMetricsPage() {
   const { vps, overview } = useVpsWorkspace();
   return (
     <div className="space-y-2">
-      <h2 className="text-lg font-normal text-white">
+      <h2 className="text-lg font-semibold tracking-tight text-text">
         Metrics for {vpsDisplayName(vps)}
       </h2>
       <MetricsPanel
@@ -550,7 +569,7 @@ export function VpsWorkspaceJobsPage() {
   const { vps, overview } = useVpsWorkspace();
   return (
     <div className="space-y-2">
-      <h2 className="text-lg font-normal text-white">
+      <h2 className="text-lg font-semibold tracking-tight text-text">
         Jobs for {vpsDisplayName(vps)}
       </h2>
       <JobsPanel jobs={overview.jobs} />
@@ -562,7 +581,7 @@ export function VpsWorkspaceAuditPage() {
   const { vps, overview } = useVpsWorkspace();
   return (
     <div className="space-y-2">
-      <h2 className="text-lg font-normal text-white">
+      <h2 className="text-lg font-semibold tracking-tight text-text">
         Audit for {vpsDisplayName(vps)}
       </h2>
       <AuditPanel events={overview.auditEvents} />
@@ -586,10 +605,10 @@ export function VpsWorkspaceSettingsPage() {
   const { vps, overview } = useVpsWorkspace();
   return (
     <div className="space-y-2">
-      <h2 className="text-lg font-normal text-white">
+      <h2 className="text-lg font-semibold tracking-tight text-text">
         Settings for {vpsDisplayName(vps)}
       </h2>
-      <p className="text-sm text-white/50">
+      <p className="text-sm text-dim">
         Runtime settings are still global until scoped settings/actions are
         separated.
       </p>

@@ -18,13 +18,13 @@ export function CreateServerCard({
   onCreateFormChange,
 }: ServersPanelProps) {
   return (
-    <Card className="h-fit min-w-0 overflow-hidden border-0 bg-white/[0.03] shadow-none/95 shadow-none  xl:sticky xl:top-5">
-      <CardHeader className="min-w-0 border-b border-white/10 bg-[#1f2228] pb-4 text-white">
-        <p className="truncate text-[11px] font-normal uppercase tracking-[0.2em] text-[#a3a3a3]">
+    <Card className="h-fit min-w-0 overflow-hidden border-0 bg-raised/60 shadow-none  xl:sticky xl:top-5">
+      <CardHeader className="min-w-0 border-b border-line bg-raised pb-4 text-text">
+        <p className="truncate text-[11px] font-normal uppercase tracking-[0.2em] text-dim">
           Add server
         </p>
-        <CardTitle className="truncate text-white">New VPS</CardTitle>
-        <CardDescription className="text-white/58">
+        <CardTitle className="truncate text-text">New VPS</CardTitle>
+        <CardDescription className="text-dim">
           Password is optional and never stored.
         </CardDescription>
       </CardHeader>
@@ -35,7 +35,7 @@ export function CreateServerCard({
           className="grid min-w-0 gap-4"
         >
           <fieldset className="grid gap-3">
-            <legend className="mb-1 text-[11px] font-normal uppercase tracking-[0.14em] text-white/50">
+            <legend className="mb-1 text-[11px] font-normal uppercase tracking-[0.14em] text-dim">
               Basic info
             </legend>
             <Label>
@@ -58,7 +58,7 @@ export function CreateServerCard({
               />
               <span
                 id="create-server-display-name-help"
-                className="block text-xs font-normal leading-5 text-white/45"
+                className="block text-xs font-normal leading-5 text-dim"
               >
                 A friendly label shown throughout the dashboard (1–80 characters).
               </span>
@@ -78,7 +78,7 @@ export function CreateServerCard({
                   })
                 }
               />
-              <span className="block text-xs font-normal leading-5 text-white/45">
+              <span className="block text-xs font-normal leading-5 text-dim">
                 Stable server name kept for API and older-record compatibility.
               </span>
             </Label>
@@ -99,7 +99,7 @@ export function CreateServerCard({
             </Label>
           </fieldset>
           <fieldset className="grid gap-3">
-            <legend className="mb-1 text-[11px] font-normal uppercase tracking-[0.14em] text-white/50">
+            <legend className="mb-1 text-[11px] font-normal uppercase tracking-[0.14em] text-dim">
               SSH access
             </legend>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2">
@@ -137,7 +137,7 @@ export function CreateServerCard({
             </div>
           </fieldset>
           <fieldset className="grid gap-3">
-            <legend className="mb-1 text-[11px] font-normal uppercase tracking-[0.14em] text-white/50">
+            <legend className="mb-1 text-[11px] font-normal uppercase tracking-[0.14em] text-dim">
               Key provisioning
             </legend>
             <Label>

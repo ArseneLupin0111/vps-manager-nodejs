@@ -425,14 +425,14 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
       ? Math.min(100, Math.max(0, Math.round(activeJob.progress as number)))
       : null;
     liveContent = (
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-sky-200">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-info">
         <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />
         <span>{PHASE_LABELS[activeJob.state]}</span>
-        <span className="text-white/45">
+        <span className="text-dim">
           target {activeJob.releaseVersion} ({shortBuild(activeJob.releaseBuildId)})
         </span>
         {percent !== null ? (
-          <span className="tabular-nums text-white/70">{percent}%</span>
+          <span className="tabular-nums text-text">{percent}%</span>
         ) : null}
         {percent !== null ? (
           <div
@@ -441,10 +441,10 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent}
-            className="h-1.5 w-full max-w-56 overflow-hidden bg-white/10"
+            className="h-1.5 w-full max-w-56 overflow-hidden rounded-none bg-raised"
           >
             <div
-              className="h-full bg-sky-400 transition-[width] duration-300"
+              className="h-full rounded-none bg-info transition-[width] duration-300"
               style={{ width: `${percent}%` }}
             />
           </div>
@@ -460,13 +460,13 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
         resultJob.result?.reportedBuildId ??
         resultJob.releaseBuildId;
       liveContent = (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-300">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-signal">
           <CheckCircle2 size={13} aria-hidden="true" />
           <span>
             Upgrade confirmed — {resultJob.releaseVersion} ({shortBuild(confirmedBuild)}) is sending a fresh heartbeat.
           </span>
           {finishedAt ? (
-            <span className="text-white/45" title={formatDate(completedAt)}>
+            <span className="text-dim" title={formatDate(completedAt)}>
               {finishedAt}
             </span>
           ) : null}
@@ -474,7 +474,7 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
       );
     } else if (resultJob.state === "rolled_back") {
       liveContent = (
-        <div className="space-y-1 text-xs text-amber-300">
+        <div className="space-y-1 text-xs text-warn">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <AlertTriangle size={13} aria-hidden="true" />
             <span>
@@ -482,12 +482,12 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
               {resultJob.error ? ` ${resultJob.error.message}` : ""}
             </span>
             {finishedAt ? (
-              <span className="text-white/45" title={formatDate(completedAt)}>
+              <span className="text-dim" title={formatDate(completedAt)}>
                 {finishedAt}
               </span>
             ) : null}
           </div>
-          <p className="text-white/55">
+          <p className="text-dim">
             The previous build is still running — inspect the failed step on the host with
             <span className="font-mono"> journalctl -u vps-manager-agent</span>, then retry the upgrade.
           </p>
@@ -495,19 +495,19 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
       );
     } else if (resultJob.state === "rollback_unverified") {
       liveContent = (
-        <div className="space-y-1 text-xs text-red-300">
+        <div className="space-y-1 text-xs text-crit">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <AlertTriangle size={13} aria-hidden="true" />
             <span>
               Upgrade failed and the rollback is unverified — manual intervention required.
             </span>
             {finishedAt ? (
-              <span className="text-white/45" title={formatDate(completedAt)}>
+              <span className="text-dim" title={formatDate(completedAt)}>
                 {finishedAt}
               </span>
             ) : null}
           </div>
-          <p className="text-white/55">
+          <p className="text-dim">
             No fresh heartbeat arrived after the swap deadline. On the host, run
             <span className="font-mono"> systemctl status vps-manager-agent</span> and
             <span className="font-mono"> journalctl -u vps-manager-agent</span>, confirm which build is
@@ -517,14 +517,14 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
       );
     } else {
       liveContent = (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-red-300">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-crit">
           <AlertTriangle size={13} aria-hidden="true" />
           <span>
             Upgrade failed before the agent was swapped.
             {resultJob.error ? ` ${resultJob.error.message}` : ""}
           </span>
           {finishedAt ? (
-            <span className="text-white/45" title={formatDate(completedAt)}>
+            <span className="text-dim" title={formatDate(completedAt)}>
               {finishedAt}
             </span>
           ) : null}
@@ -568,7 +568,7 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
   );
 
   const retryRow = loadError ? (
-    <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/45">
+    <div className="flex flex-wrap items-center gap-2 text-[11px] text-dim">
       <span>Update status unavailable.</span>
       <Button type="button" size="sm" variant="outline" className="text-[11px]" onClick={() => void refreshStatus()}>
         <RefreshCw size={12} />
@@ -580,10 +580,10 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
   const details = status ? (
     <>
       <div className={dense ? "flex flex-wrap items-center gap-x-2 gap-y-1" : "flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"}>
-        {dense && variant === "card" ? <span className="text-white/40">Update</span> : null}
-        {installedText ? <span className="text-white/70">{installedText}</span> : null}
+        {dense && variant === "card" ? <span className="text-dim">Update</span> : null}
+        {installedText ? <span className="text-text">{installedText}</span> : null}
         {heartbeatText ? (
-          <span className={`text-[11px] ${installed?.fresh ? "text-white/40" : "text-amber-300/80"}`} title={formatDate(installed?.lastSeenAt ?? undefined)}>
+          <span className={`text-[11px] ${installed?.fresh ? "text-dim" : "text-warn/80"}`} title={formatDate(installed?.lastSeenAt ?? undefined)}>
             {heartbeatText}
           </span>
         ) : null}
@@ -631,10 +631,10 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
         {actions}
       </div>
       {displayedReason ? (
-        <p id={reasonId} className="mt-1 text-[11px] text-white/45">{displayedReason}</p>
+        <p id={reasonId} className="mt-1 text-[11px] text-dim">{displayedReason}</p>
       ) : null}
       {actionError ? (
-        <p role="alert" className="mt-1 text-[11px] text-red-300">
+        <p role="alert" className="mt-1 text-[11px] text-crit">
           {actionError}
         </p>
       ) : null}
@@ -693,37 +693,37 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
                 build sends a fresh heartbeat from this server.
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <div className="space-y-2 text-xs text-white/70">
+            <div className="space-y-2 text-xs text-text">
               <div className="flex justify-between gap-4">
-                <span className="text-white/40">Current</span>
+                <span className="text-dim">Current</span>
                 <span className="text-right">
                   {installedText ?? "Unknown"}
                   {heartbeatText ? ` · ${heartbeatText}` : ""}
                 </span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-white/40">Target</span>
+                <span className="text-dim">Target</span>
                 <span className="text-right">
                   {available ? `${available.version} (${shortBuild(available.buildId)})` : ""}
                 </span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-white/40">Release ID</span>
+                <span className="text-dim">Release ID</span>
                 <span className="break-all text-right font-mono">{available?.releaseId ?? ""}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-white/40">Downtime</span>
+                <span className="text-dim">Downtime</span>
                 <span className="text-right">
                   Monitoring pauses for a few seconds while the agent restarts.
                 </span>
               </div>
-              <p className="text-white/50">
+              <p className="text-dim">
                 If the upgrade cannot complete, the updater restores the previous binary and verifies its
                 heartbeat; an unverified rollback is flagged for manual intervention. Existing credentials
                 are preserved.
               </p>
               {actionError ? (
-                <p role="alert" className="text-red-300">
+                <p role="alert" className="text-crit">
                   {actionError}
                 </p>
               ) : null}
@@ -755,17 +755,17 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
             </AlertDialogHeader>
             {instructions ? (
               <>
-                <pre className="max-h-64 overflow-auto border border-white/10 bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
+                <pre className="max-h-64 overflow-auto border border-line bg-ink p-3 text-[11px] leading-relaxed text-text">
                   {instructions.script}
                 </pre>
-                <ul className="list-disc space-y-1 pl-4 text-[11px] text-white/50">
+                <ul className="list-disc space-y-1 pl-4 text-[11px] text-dim">
                   {instructions.notes.map((note) => (
                     <li key={note}>{note}</li>
                   ))}
                 </ul>
               </>
             ) : (
-              <p className="text-xs text-white/60">No published release is available to install.</p>
+              <p className="text-xs text-dim">No published release is available to install.</p>
             )}
             <AlertDialogFooter>
               <AlertDialogCancel>Close</AlertDialogCancel>
@@ -780,8 +780,8 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
 function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex justify-between gap-3">
-      <span className="text-white/40">{label}</span>
-      <span className={`break-all text-right text-white/70 ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className="text-dim">{label}</span>
+      <span className={`break-all text-right text-text ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }

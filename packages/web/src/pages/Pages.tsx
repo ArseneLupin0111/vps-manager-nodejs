@@ -1,16 +1,25 @@
 import { useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { DashboardShell } from "../components/layout/DashboardShell";
 import { ServersPanel } from "../components/dashboard/DashboardPanels";
 import { useDashboard, type DashboardCtx } from "../context/DashboardContext";
+import { vpsDisplayName } from "../lib/dashboard-formatters";
 
 // ── Layout wrapper ──────────────────────────────────────────────────
 
 export function DashboardLayout() {
   const ctx = useDashboard();
+  const { pathname } = useLocation();
+  const segment = pathname.split("/")[2];
+  const workspaceRecord = segment
+    ? ctx.records.find((record) => record.id === segment)
+    : undefined;
+  const workspaceName = workspaceRecord
+    ? vpsDisplayName(workspaceRecord)
+    : undefined;
   return (
     <DashboardShell
       mode={ctx.mode}
@@ -18,6 +27,7 @@ export function DashboardLayout() {
       liveState={ctx.liveState}
       onRefresh={ctx.onRefresh}
       onLogout={ctx.onLogout}
+      workspaceName={workspaceName}
     >
       <Outlet />
     </DashboardShell>
@@ -30,38 +40,40 @@ export function VpsListPage() {
   const ctx = useDashboard();
   const [viewMode, setViewMode] = useState<"card" | "table">("card");
   return (
-    <ServersPanel
-      records={ctx.records}
-      visibleRecords={ctx.visibleRecords}
-      statusMessage={ctx.statusAlert}
-      serverSearch={ctx.serverSearch}
-      statusFilter={ctx.statusFilter}
-      busy={ctx.busy}
-      mode={ctx.mode}
-      provisionPasswords={ctx.provisionPasswords}
-      createForm={ctx.createForm}
-      metrics={ctx.metrics}
-      systemInfo={ctx.systemInfo}
-      dockerMetrics={ctx.dockerMetrics}
-      jobs={ctx.jobs}
-      viewMode={viewMode}
-      onViewModeChange={setViewMode}
-      onSearchChange={ctx.onSearchChange}
-      onStatusFilterChange={ctx.onStatusFilterChange}
-      onCreateFormChange={ctx.onCreateFormChange}
-      onCreate={ctx.onCreate}
-      onPasswordChange={ctx.onPasswordChange}
-      onProvision={ctx.onProvision}
-      onVerify={ctx.onVerify}
-      onInstallAgent={ctx.onInstallAgent}
-      onUninstallAgent={ctx.onUninstallAgent}
-      onUpgradeAgent={ctx.onUpgradeAgent}
-      onRestartAgent={ctx.onRestartAgent}
-      onRotateAgent={ctx.onRotateAgent}
-      onToggleDockerMetrics={ctx.onToggleDockerMetrics}
-      onEdit={ctx.onEdit}
-      onDelete={ctx.onDelete}
-    />
+    <div className="grid min-w-0 gap-6">
+      <ServersPanel
+        records={ctx.records}
+        visibleRecords={ctx.visibleRecords}
+        statusMessage={ctx.statusAlert}
+        serverSearch={ctx.serverSearch}
+        statusFilter={ctx.statusFilter}
+        busy={ctx.busy}
+        mode={ctx.mode}
+        provisionPasswords={ctx.provisionPasswords}
+        createForm={ctx.createForm}
+        metrics={ctx.metrics}
+        systemInfo={ctx.systemInfo}
+        dockerMetrics={ctx.dockerMetrics}
+        jobs={ctx.jobs}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        onSearchChange={ctx.onSearchChange}
+        onStatusFilterChange={ctx.onStatusFilterChange}
+        onCreateFormChange={ctx.onCreateFormChange}
+        onCreate={ctx.onCreate}
+        onPasswordChange={ctx.onPasswordChange}
+        onProvision={ctx.onProvision}
+        onVerify={ctx.onVerify}
+        onInstallAgent={ctx.onInstallAgent}
+        onUninstallAgent={ctx.onUninstallAgent}
+        onUpgradeAgent={ctx.onUpgradeAgent}
+        onRestartAgent={ctx.onRestartAgent}
+        onRotateAgent={ctx.onRotateAgent}
+        onToggleDockerMetrics={ctx.onToggleDockerMetrics}
+        onEdit={ctx.onEdit}
+        onDelete={ctx.onDelete}
+      />
+    </div>
   );
 }
 
@@ -80,8 +92,8 @@ function CreateVpsFormInline({ ctx }: { ctx: DashboardCtx }) {
   return (
     <div className="grid min-w-0 gap-5">
       <div className="min-w-0 space-y-2">
-        <h2 className="text-xl font-normal text-white">New VPS</h2>
-        <p className="text-sm text-white/50">
+        <h2 className="text-xl font-semibold tracking-tight text-text">New VPS</h2>
+        <p className="text-sm text-dim">
           Password is optional and never stored.
         </p>
       </div>
@@ -91,10 +103,10 @@ function CreateVpsFormInline({ ctx }: { ctx: DashboardCtx }) {
         className="grid min-w-0 gap-4"
       >
         <fieldset className="grid gap-3">
-          <legend className="mb-1 text-xs font-normal uppercase tracking-[0.14em] text-white/50">
+          <legend className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-dim">
             Basic info
           </legend>
-          <Label className="text-white">
+          <Label>
             Display name
             <Input
               required
@@ -114,12 +126,12 @@ function CreateVpsFormInline({ ctx }: { ctx: DashboardCtx }) {
             />
             <span
               id="display-name-help"
-              className="block text-xs font-normal leading-5 text-white/45"
+              className="block text-xs font-normal leading-5 text-dim"
             >
               A friendly label shown throughout the dashboard (1–80 characters).
             </span>
           </Label>
-          <Label className="text-white">
+          <Label>
             Name
             <Input
               required
@@ -134,11 +146,11 @@ function CreateVpsFormInline({ ctx }: { ctx: DashboardCtx }) {
                 })
               }
             />
-            <span className="block text-xs font-normal leading-5 text-white/45">
+            <span className="block text-xs font-normal leading-5 text-dim">
               Stable server name kept for API and older-record compatibility.
             </span>
           </Label>
-          <Label className="text-white">
+          <Label>
             Host / IP
             <Input
               required
@@ -155,11 +167,11 @@ function CreateVpsFormInline({ ctx }: { ctx: DashboardCtx }) {
           </Label>
         </fieldset>
         <fieldset className="grid gap-3">
-          <legend className="mb-1 text-xs font-normal uppercase tracking-[0.14em] text-white/50">
+          <legend className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-dim">
             SSH access
           </legend>
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-            <Label className="text-white">
+            <Label>
               Port
               <Input
                 required
@@ -175,7 +187,7 @@ function CreateVpsFormInline({ ctx }: { ctx: DashboardCtx }) {
                 }
               />
             </Label>
-            <Label className="text-white">
+            <Label>
               Username
               <Input
                 required
@@ -193,10 +205,10 @@ function CreateVpsFormInline({ ctx }: { ctx: DashboardCtx }) {
           </div>
         </fieldset>
         <fieldset className="grid gap-3">
-          <legend className="mb-1 text-xs font-normal uppercase tracking-[0.14em] text-white/50">
+          <legend className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-dim">
             Key provisioning
           </legend>
-          <Label className="text-white">
+          <Label>
             Optional password
             <Input
               type="password"
@@ -232,8 +244,8 @@ export function NotFoundPage() {
   return (
     <div className="grid min-h-[40vh] place-items-center">
       <div className="text-center">
-        <h2 className="text-2xl font-normal text-white">404</h2>
-        <p className="mt-2 text-white/50">Page not found.</p>
+        <h2 className="text-2xl font-semibold tracking-tight text-text">404</h2>
+        <p className="mt-2 text-dim">Page not found.</p>
         <Button
           variant="outline"
           className="mt-4"

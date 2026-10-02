@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +32,7 @@ type Props = {
   liveState: LiveConnectionState;
   onRefresh: () => void;
   onLogout?: () => void;
+  workspaceName?: string;
   children: ReactNode;
 };
 
@@ -42,6 +42,7 @@ export function DashboardShell({
   liveState,
   onRefresh,
   onLogout,
+  workspaceName,
   children,
 }: Props) {
   const { pathname } = useLocation();
@@ -49,112 +50,88 @@ export function DashboardShell({
   const isVpsNew = pathname === "/vps/new";
   const isWorkspace = pathname.startsWith("/vps/") && !isVpsNew;
 
-  const contextLabel = isVpsList
-    ? "Fleet"
+  const currentCrumb = isVpsList
+    ? "Servers"
     : isVpsNew
       ? "New VPS"
       : isWorkspace
-        ? "Server workspace"
+        ? (workspaceName?.trim() || "Server workspace")
         : "Dashboard";
 
-  const pageTitle = isVpsList ? "Servers" : "New VPS";
-  const pageDescription = isVpsList
-    ? "Manage VPS access, SSH keys, health checks, and provisioning."
-    : "Add a new server to your fleet.";
-
   return (
-    <main className="min-h-screen w-full max-w-full overflow-x-clip bg-background">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#1f2228]/95 text-white backdrop-blur-md">
-        <div className="flex min-h-14 min-w-0 items-center justify-between gap-3 px-3 sm:min-h-16 sm:px-5 xl:px-8">
-          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <Link
-              to="/vps"
-              aria-label="FlexServer — go to servers"
-              className="inline-flex shrink-0 items-center gap-2 text-white transition hover:text-white/80"
-            >
-              <span className="grid h-9 w-9 place-items-center border border-white/10 bg-white/[0.03] sm:h-10 sm:w-10">
-                <Server size={18} />
+    <main className="min-h-screen w-full bg-ink text-text">
+      <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-line bg-ink/90 px-4 backdrop-blur sm:px-6">
+        <nav
+          aria-label="Dashboard context"
+          className="flex min-w-0 flex-1 items-center gap-2 text-[13px] sm:gap-3"
+        >
+          <Link
+            to="/vps"
+            aria-label="FlexServer — go to servers"
+            className="flex shrink-0 items-center gap-2 font-semibold text-text transition-colors hover:text-dim focus-visible:outline-2 focus-visible:outline-signal"
+          >
+            <span className="grid h-8 w-8 place-items-center border border-line bg-panel text-signal">
+              <Server size={16} aria-hidden="true" />
+            </span>
+            <span className="hidden min-[400px]:inline">FlexServer</span>
+          </Link>
+          <span aria-hidden="true" className="shrink-0 text-line">
+            /
+          </span>
+          {isVpsList ? (
+            <span aria-current="page" className="truncate font-medium text-text">
+              Servers
+            </span>
+          ) : (
+            <>
+              <Link
+                to="/vps"
+                className="shrink-0 text-dim transition-colors hover:text-text"
+              >
+                Servers
+              </Link>
+              <span aria-hidden="true" className="shrink-0 text-line">
+                /
               </span>
-              <span className="hidden font-display text-sm font-normal sm:inline">
-                FlexServer
+              <span
+                aria-current="page"
+                className="max-w-[140px] truncate font-medium text-text sm:max-w-[240px]"
+              >
+                {currentCrumb}
               </span>
-            </Link>
+            </>
+          )}
+        </nav>
 
-            <span aria-hidden="true" className="h-5 w-px bg-white/10" />
-
-            <nav aria-label="Dashboard context" className="min-w-0">
-              <ol className="flex min-w-0 items-center gap-2 text-sm">
-                {isWorkspace || isVpsNew ? (
-                  <li className="hidden shrink-0 sm:block">
-                    <Link
-                      to="/vps"
-                      className="text-white/50 transition hover:text-white"
-                    >
-                      Servers
-                    </Link>
-                  </li>
-                ) : null}
-                {isWorkspace || isVpsNew ? (
-                  <li aria-hidden="true" className="hidden text-white/30 sm:block">
-                    /
-                  </li>
-                ) : null}
-                <li
-                  className="truncate font-normal text-white"
-                  aria-current="page"
-                >
-                  {contextLabel}
-                </li>
-              </ol>
-            </nav>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <div className="flex items-center gap-2 border-r border-white/10 pr-2 sm:gap-3 sm:pr-3">
-              <ModeLabel mode={mode} />
-              <LiveStatus state={liveState} />
-            </div>
-            <IconButton
-              label={busy ? "Refreshing" : "Refresh dashboard"}
-              disabled={busy}
-              onClick={onRefresh}
-            >
-              <RefreshCw
-                size={17}
-                className={cn(busy && "animate-spin")}
-              />
-            </IconButton>
-            <UserMenu onLogout={onLogout} />
-          </div>
+        <div className="flex shrink-0 items-center gap-3 text-[12px] text-dim">
+          <ModeLabel mode={mode} />
+          <LiveStatus state={liveState} />
+          <IconButton
+            label={busy ? "Refreshing" : "Refresh dashboard"}
+            disabled={busy}
+            onClick={onRefresh}
+          >
+            <RefreshCw size={14} className={cn(busy && "animate-spin")} />
+          </IconButton>
+          <UserMenu onLogout={onLogout} />
         </div>
       </header>
 
-      {!isWorkspace ? (
-        <section className="border-b border-white/10 bg-[#1f2228] px-3 py-5 text-white sm:px-5 sm:py-7 xl:px-8">
-          <div className="min-w-0 max-w-3xl">
-            <p className="text-[11px] font-normal uppercase tracking-[0.18em] text-white/50">
-              {isVpsList ? "Fleet" : "Fleet setup"}
-            </p>
-            <h1 className="mt-1.5 font-display text-2xl font-normal leading-tight sm:text-3xl">
-              {pageTitle}
-            </h1>
-            <p className="mt-1 max-w-2xl text-sm leading-5 text-white/50">
-              {pageDescription}
-            </p>
-          </div>
-        </section>
-      ) : null}
-
-      <section className="min-w-0 max-w-full overflow-hidden px-3 py-4 sm:px-5 sm:py-5 xl:px-8">
+      <div
+        className={cn(
+          "mx-auto w-full max-w-[1280px] px-4 pb-12 sm:px-6",
+          isWorkspace ? "pt-6" : "pt-6 sm:pt-8",
+        )}
+      >
         {children}
-      </section>
+      </div>
     </main>
   );
 }
 
 function ModeLabel({ mode }: { mode: "demo" | "local" }) {
   return (
-    <span className="hidden whitespace-nowrap text-xs font-normal text-white/60 md:inline">
+    <span className="whitespace-nowrap text-dim max-[560px]:hidden">
       {mode === "demo" ? "Demo environment" : "Local environment"}
     </span>
   );
@@ -179,20 +156,23 @@ function LiveStatus({ state }: { state: LiveConnectionState }) {
       role="status"
       aria-label={`Monitoring connection: ${label}`}
       title={latestEvent ? `Latest monitoring event: ${latestEvent}` : undefined}
-      className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-white/75 sm:text-xs"
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap",
+        state.status === "live" ? "text-text" : "text-dim",
+      )}
     >
-      <span
+      <i
+        aria-hidden="true"
         className={cn(
           "h-1.5 w-1.5 rounded-full",
           state.status === "live"
-            ? "bg-emerald-400"
+            ? "pulse bg-signal"
             : state.status === "connecting"
-              ? "bg-amber-300"
-              : "bg-rose-400",
+              ? "bg-warn"
+              : "bg-crit",
         )}
-        aria-hidden="true"
       />
-      <span>{label}</span>
+      <span className="max-[560px]:hidden">{label}</span>
     </span>
   );
 }
@@ -203,25 +183,21 @@ function UserMenu({ onLogout }: { onLogout?: () => void }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex h-9 w-9 shrink-0 items-center text-sm font-normal text-primary transition hover:opacity-80 sm:h-10 sm:w-10"
           aria-label="Open local admin account menu"
           title="Local admin account"
+          className="grid h-8 w-8 shrink-0 place-items-center bg-raised text-[11px] font-semibold text-text transition-colors hover:bg-raised/70 focus-visible:outline-2 focus-visible:outline-signal"
         >
-          <Avatar className="h-9 w-9 sm:h-10 sm:w-10">
-            <AvatarImage
-              src="https://github.com/shadcn.png"
-              alt="Local admin"
-              className="grayscale"
-            />
-            <AvatarFallback>LA</AvatarFallback>
-          </Avatar>
+          LA
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56 rounded-none" align="end">
+      <DropdownMenuContent
+        className="w-56 border-line bg-panel text-text"
+        align="end"
+      >
         <DropdownMenuLabel>
           <div className="grid gap-1">
             <span>Local admin</span>
-            <span className="text-xs font-normal text-muted-foreground">
+            <span className="text-xs font-normal text-dim">
               VPS operations workspace
             </span>
           </div>
@@ -245,7 +221,7 @@ function UserMenu({ onLogout }: { onLogout?: () => void }) {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          className={onLogout ? "text-[#ffffff]" : "text-muted-foreground"}
+          className={onLogout ? "text-text" : "text-dim"}
           onSelect={onLogout}
           disabled={!onLogout}
         >
@@ -271,7 +247,7 @@ function IconButton({
       type="button"
       aria-label={label}
       className={cn(
-        "grid h-9 w-9 shrink-0 place-items-center border border-white/10 bg-white/[0.03] text-primary transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 sm:w-10",
+        "grid h-8 w-8 shrink-0 place-items-center border border-line text-text transition-colors hover:bg-raised focus-visible:outline-2 focus-visible:outline-signal disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

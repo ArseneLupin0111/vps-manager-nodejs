@@ -4,26 +4,36 @@
 
 @layer base {
   :root {
-    --background: 220 13% 14%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 100% / 0.03;
-    --card-foreground: 0 0% 100%;
-    --primary: 0 0% 100%;
-    --primary-foreground: 220 13% 14%;
-    --secondary: 0 0% 100% / 0.05;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 100% / 0.05;
-    --muted-foreground: 0 0% 100% / 0.7;
-    --accent: 0 0% 100% / 0.08;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 0% 100%;
-    --destructive-foreground: 220 13% 14%;
-    --border: 0 0% 100% / 0.1;
-    --input: 0 0% 100% / 0.2;
-    --ring: 217 91% 60%;
+    --ink: 150 8.333% 4.706%;
+    --panel: 140 8.108% 7.255%;
+    --raised: 135 7.692% 10.196%;
+    --line: 132 6.667% 14.706%;
+    --dim: 132 4% 50.98%;
+    --text: 102.857 13.725% 90%;
+    --signal: 74.227 89.815% 57.647%;
+    --warn: 37.321 100% 59.02%;
+    --crit: 4.382 100% 65.098%;
+    --info: 192.889 72.193% 63.333%;
+    --background: var(--ink);
+    --foreground: var(--text);
+    --card: var(--panel);
+    --card-foreground: var(--text);
+    --primary: var(--signal);
+    --primary-foreground: var(--ink);
+    --secondary: var(--raised);
+    --secondary-foreground: var(--text);
+    --muted: var(--raised);
+    --muted-foreground: var(--dim);
+    --accent: var(--raised);
+    --accent-foreground: var(--signal);
+    --destructive: var(--crit);
+    --destructive-foreground: var(--ink);
+    --border: var(--line);
+    --input: var(--line);
+    --ring: var(--signal);
     --radius-sm: 0rem;
     --radius-md: 0rem;
-    --radius-lg: 0.25rem;
+    --radius-lg: 0rem;
     --shadow-panel: none;
   }
 
@@ -33,12 +43,22 @@
 
   body {
     @apply m-0 min-h-screen bg-background font-body text-foreground antialiased;
-    background: #1f2228;
+    font-size: 13px;
     font-feature-settings:
       "calt" 1,
       "kern" 1,
       "liga" 1;
     letter-spacing: 0;
+  }
+
+  ::selection {
+    background: hsl(var(--signal));
+    color: hsl(var(--ink));
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--line)) transparent;
   }
 
   button,
@@ -50,4 +70,23 @@
   :focus-visible {
     @apply outline-none ring-2 ring-ring/50 ring-offset-2 ring-offset-background;
   }
+}
+
+@layer utilities {
+  .tnum {
+    @apply font-mono tabular-nums;
+  }
+
+  .pulse {
+    animation: pulse-dot 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse { animation: none; }
 }

@@ -1,4 +1,3 @@
-import { Badge } from "../../ui/badge";
 import {
   Card,
   CardContent,
@@ -8,41 +7,84 @@ import {
 } from "../../ui/card";
 import type { DashboardOverview } from "../../../lib/api";
 
+function RuntimeFact({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "ok" | "warn";
+}) {
+  const toneClass =
+    tone === "ok"
+      ? "text-signal"
+      : tone === "warn"
+        ? "text-warn"
+        : "text-text";
+  return (
+    <div className="bg-panel p-4">
+      <dt className="text-[11px] uppercase tracking-[0.14em] text-dim">
+        {label}
+      </dt>
+      <dd className={`tnum mt-1 text-[13px] ${toneClass}`}>{value}</dd>
+    </div>
+  );
+}
+
 export function SettingsPanel({ overview }: { overview: DashboardOverview }) {
   return (
-    <div className="grid gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Settings</CardTitle>
-          <CardDescription>Runtime safety posture.</CardDescription>
+    <div className="grid max-w-3xl gap-4">
+      <Card className="min-w-0 overflow-hidden">
+        <CardHeader className="border-b border-line p-4 pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle>Settings</CardTitle>
+              <CardDescription className="mt-0.5">
+                Runtime safety posture.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Badge variant="outline">APP_MODE={overview.settings.appMode}</Badge>
-          <Badge variant="outline">
-            web terminal{" "}
-            {overview.settings.webTerminalEnabled ? "enabled" : "disabled"}
-          </Badge>
-          <Badge variant="outline">
-            real SSH {overview.settings.realSshEnabled ? "enabled" : "disabled"}
-          </Badge>
-          <Badge variant="outline">
-            local auth{" "}
-            {overview.settings.authRequiredInLocalMode ? "required" : "off"}
-          </Badge>
+        <CardContent className="p-0">
+          <dl className="grid grid-cols-1 gap-px bg-line sm:grid-cols-2 xl:grid-cols-4">
+            <RuntimeFact label="App mode" value={overview.settings.appMode} />
+            <RuntimeFact
+              label="Web terminal"
+              value={
+                overview.settings.webTerminalEnabled ? "enabled" : "disabled"
+              }
+              tone={overview.settings.webTerminalEnabled ? "ok" : "warn"}
+            />
+            <RuntimeFact
+              label="Real SSH"
+              value={overview.settings.realSshEnabled ? "enabled" : "disabled"}
+              tone={overview.settings.realSshEnabled ? "ok" : "warn"}
+            />
+            <RuntimeFact
+              label="Local auth"
+              value={
+                overview.settings.authRequiredInLocalMode ? "required" : "off"
+              }
+              tone={
+                overview.settings.authRequiredInLocalMode ? "ok" : "warn"
+              }
+            />
+          </dl>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card className="min-w-0 overflow-hidden">
+        <CardHeader className="border-b border-line p-4 pb-3">
           <CardTitle>Dashboard access</CardTitle>
-          <CardDescription>
+          <CardDescription className="mt-0.5 max-w-2xl leading-5">
             Local mode uses a secure HttpOnly cookie session. Dashboard
-            passwords are verified server-side against the stored credential and
-            are never saved in browser storage.
+            passwords are verified server-side against the stored credential
+            and are never saved in browser storage.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm font-normal leading-6 text-muted-foreground">
+        <CardContent className="p-4">
+          <p className="text-[13px] leading-6 text-dim">
             Use the account menu in the top bar to log out and revoke the
             current session.
           </p>

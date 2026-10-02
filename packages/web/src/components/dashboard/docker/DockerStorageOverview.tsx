@@ -14,24 +14,26 @@ export function DockerStorageOverview({
 }) {
   if (loading) {
     return (
-      <section aria-label="Docker storage" aria-busy="true" className="rounded-none border border-white/10 bg-black/10 p-4">
-        <p className="text-xs text-white/50">Loading Docker-managed storage…</p>
+      <section aria-label="Docker storage" aria-busy="true" className="border border-line bg-panel p-4">
+        <p className="text-[12px] text-dim">Loading Docker-managed storage…</p>
       </section>
     );
   }
   if (error) {
     return (
-      <section aria-label="Docker storage" className="rounded-none border border-white/10 bg-black/10 p-4">
-        <p className="text-xs text-white/70">Docker-managed storage is unavailable right now.</p>
-        <p className="mt-1 text-[11px] text-white/40">{error}</p>
+      <section aria-label="Docker storage" className="border border-line bg-panel p-4">
+        <p className="text-[12px] text-text">Docker-managed storage is unavailable right now.</p>
+        <p className="mt-1 text-[11px] text-dim">{error}</p>
       </section>
     );
   }
   if (!storage) {
     return (
-      <section aria-label="Docker storage" className="rounded-none border border-white/10 bg-black/10 p-4">
-        <h3 className="text-xs font-medium text-white/75">Docker-managed storage</h3>
-        <div className="mt-2">
+      <section aria-label="Docker storage" className="border border-line bg-panel">
+        <header className="border-b border-line px-4 py-3">
+          <h3 className="text-[14px] font-semibold">Docker-managed storage</h3>
+        </header>
+        <div className="p-4">
           <EmptyState>
             No Docker-managed storage reported yet. This section covers Docker-managed images, containers, volumes, and build cache — never host free space.
           </EmptyState>
@@ -48,16 +50,18 @@ export function DockerStorageOverview({
   ];
 
   return (
-    <section aria-label="Docker storage" className="rounded-none border border-white/10 bg-black/10 p-4">
-      <h3 className="text-xs font-medium text-white/75">Docker-managed storage</h3>
-      <p className="mt-1 text-[11px] text-white/40">
-        Docker-managed usage only — never host free space. Reported {new Date(storage.collectedAt).toLocaleString()}.
-      </p>
-      <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+    <section aria-label="Docker storage" className="border border-line bg-panel">
+      <header className="border-b border-line px-4 py-3">
+        <h3 className="text-[14px] font-semibold">Docker-managed storage</h3>
+        <p className="mt-0.5 text-[12px] text-dim">
+          Docker-managed usage only — never host free space. Reported {new Date(storage.collectedAt).toLocaleString()}.
+        </p>
+      </header>
+      <dl className="grid gap-2 p-4 sm:grid-cols-2">
         {rows.map(({ label, value }) => (
-          <div key={label} className="rounded-none border border-white/10 bg-black/20 px-3 py-2 text-[12px]">
-            <dt className="text-white/50">{label}</dt>
-            <dd className="mt-0.5 text-white/85">
+          <div key={label} className="border border-line bg-raised px-3 py-2 text-[12px]">
+            <dt className="text-[11px] uppercase tracking-[0.14em] text-dim">{label}</dt>
+            <dd className="tnum mt-0.5 text-text">
               {value.supported ? `${value.count} · ${formatBytes(value.totalBytes)}` : "Not reported by this agent"}
             </dd>
           </div>

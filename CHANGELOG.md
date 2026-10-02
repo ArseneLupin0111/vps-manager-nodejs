@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — reference dashboard design
+
+- Restyle FlexServer using the supplied VPS Management Dashboard reference: ink/lime palette, compact header, square panels, fleet cards/table, and workspace tabs.
+- Align overview, metrics, Docker monitoring, jobs, audit, terminal, settings, forms, and overlays with shared design tokens while retaining API-backed controls and access restrictions.
+- Keep missing telemetry explicit instead of presenting unrelated metric history as memory or network data.
+
 ## Unreleased — CI/CD optimization
 
 - Scope PR checks through a lightweight change-detection job; keep the full verification matrix on main and honor manual force-build inputs.

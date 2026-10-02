@@ -72,23 +72,23 @@ export function EditServerDialog({ vps, open, onOpenChange, onSave }: {
   const field = (key: keyof FormState, value: string) => setForm((current) => current ? { ...current, [key]: value } : current);
   return (
     <AlertDialog open={open} onOpenChange={(next) => { if (!next) close(); }}>
-      <AlertDialogContent className="max-h-[90vh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto border-white/10 bg-[#111318] p-0 text-white">
+      <AlertDialogContent className="max-h-[90vh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-none border-line bg-panel p-0 text-text shadow-none">
         <form onSubmit={submit}>
-          <AlertDialogHeader className="border-b border-white/10 px-5 py-5 sm:px-6">
+          <AlertDialogHeader className="border-b border-line px-5 py-5 sm:px-6">
             <AlertDialogTitle>Edit server</AlertDialogTitle>
-            <AlertDialogDescription className="text-white/55">Update the name and SSH connection details. Location is detected automatically.</AlertDialogDescription>
+            <AlertDialogDescription className="text-dim">Update the name and SSH connection details. Location is detected automatically.</AlertDialogDescription>
           </AlertDialogHeader>
           {form ? <div className="grid gap-4 px-5 py-5 sm:grid-cols-2 sm:px-6">
-            <Label className="text-white sm:col-span-2">Display name<Input autoFocus required maxLength={80} value={form.displayName} onChange={(e) => field("displayName", e.target.value)} /></Label>
-            <Label className="text-white">Host / IP<Input required maxLength={255} value={form.host} onChange={(e) => field("host", e.target.value)} /></Label>
-            <Label className="text-white">SSH port<Input required type="number" min={1} max={65535} step={1} value={form.port} onChange={(e) => field("port", e.target.value)} /></Label>
-            <Label className="text-white sm:col-span-2">Username<Input required maxLength={64} autoComplete="username" value={form.username} onChange={(e) => field("username", e.target.value)} /></Label>
-            <Label className="text-white">Provider<Input maxLength={80} value={form.provider} onChange={(e) => field("provider", e.target.value)} /></Label>
-            <div className="self-end pb-2 text-xs leading-5 text-white/45">Location cannot be edited.</div>
-            <Label className="text-white sm:col-span-2">Notes<textarea className="mt-1.5 min-h-24 w-full resize-y border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/20" maxLength={1000} value={form.notes} onChange={(e) => field("notes", e.target.value)} /></Label>
-            {error ? <p role="alert" className="sm:col-span-2 border border-red-400/25 bg-red-400/10 px-3 py-2 text-sm text-red-200">{error}</p> : null}
+            <Label className="text-text sm:col-span-2">Display name<Input autoFocus required maxLength={80} value={form.displayName} onChange={(e) => field("displayName", e.target.value)} /></Label>
+            <Label className="text-text">Host / IP<Input required maxLength={255} value={form.host} onChange={(e) => field("host", e.target.value)} /></Label>
+            <Label className="text-text">SSH port<Input required type="number" min={1} max={65535} step={1} value={form.port} onChange={(e) => field("port", e.target.value)} /></Label>
+            <Label className="text-text sm:col-span-2">Username<Input required maxLength={64} autoComplete="username" value={form.username} onChange={(e) => field("username", e.target.value)} /></Label>
+            <Label className="text-text">Provider<Input maxLength={80} value={form.provider} onChange={(e) => field("provider", e.target.value)} /></Label>
+            <div className="self-end pb-2 text-xs leading-5 text-dim">Location cannot be edited.</div>
+            <Label className="text-text sm:col-span-2">Notes<textarea className="mt-1.5 min-h-24 w-full resize-y border border-line bg-ink px-3 py-2 text-sm text-text outline-none transition focus:border-signal focus:ring-4 focus:ring-signal/20" maxLength={1000} value={form.notes} onChange={(e) => field("notes", e.target.value)} /></Label>
+            {error ? <p role="alert" className="sm:col-span-2 border border-crit/25 bg-crit/10 px-3 py-2 text-sm text-crit">{error}</p> : null}
           </div> : null}
-          <AlertDialogFooter className="border-t border-white/10 px-5 py-4 sm:px-6">
+          <AlertDialogFooter className="border-t border-line px-5 py-4 sm:px-6">
             <Button type="button" variant="outline" disabled={saving} onClick={close}>Cancel</Button>
             <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button>
           </AlertDialogFooter>

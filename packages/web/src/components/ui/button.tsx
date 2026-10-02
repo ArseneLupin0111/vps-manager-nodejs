@@ -5,26 +5,26 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-none text-sm font-normal ring-offset-background transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-none text-[13px] font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default:
-          "rounded-none bg-white text-[#1f2228] shadow-none hover:bg-white/90",
+          "bg-signal text-ink shadow-none hover:bg-signal/90",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:
-          "border border-white/10 bg-transparent text-[#ffffff] shadow-none hover:opacity-60",
+          "border border-line bg-transparent text-text shadow-none hover:border-dim hover:bg-raised",
         secondary:
-          "border border-white/10 bg-white/[0.03] text-[#ffffff] shadow-none hover:opacity-60",
-        ghost: "text-white/50 hover:text-white hover:opacity-60",
+          "border border-line bg-raised text-text shadow-none hover:border-dim",
+        ghost: "text-dim hover:bg-raised hover:text-text",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-none px-3",
-        lg: "h-11 rounded-none px-8",
-        icon: "h-10 w-10",
+        default: "h-9 px-3 py-2",
+        sm: "h-8 rounded-none px-3 text-xs",
+        lg: "h-11 rounded-none px-6",
+        icon: "h-9 w-9",
       },
     },
     defaultVariants: {

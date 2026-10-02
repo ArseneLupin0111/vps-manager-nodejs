@@ -4,25 +4,25 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-none border px-2.5 py-1 text-[11px] font-normal uppercase tracking-[0.08em] leading-none transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-none border px-2 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.06em] leading-none transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
       variant: {
         default:
-          "border-white/20 bg-white/[0.03] text-white/70 hover:bg-white/[0.08]",
+          "border-line bg-raised text-dim",
         secondary:
-          "border-white/10 bg-white/[0.03] text-[#ffffff] hover:bg-white/[0.03]",
+          "border-line bg-raised text-text",
         destructive:
-          "border-white/20 bg-white/[0.03] text-white/70 hover:bg-white/[0.08]",
+          "border-crit/25 bg-crit/10 text-crit",
         outline: "text-foreground",
         ready:
-          "border-white/20 bg-white/[0.03] text-white/70 hover:bg-white/[0.08]",
+          "border-signal/25 bg-signal/10 text-signal",
         pending:
-          "border-white/10 bg-white/[0.03] text-[#ffffff] hover:bg-white/[0.03]",
+          "border-info/25 bg-info/10 text-info",
         success:
-          "border-white/20 bg-white/[0.03] text-white/70 hover:bg-white/[0.08]",
+          "border-signal/25 bg-signal/10 text-signal",
         warning:
-          "border-white/20 bg-white/[0.03] text-white/70 hover:bg-white/[0.08]",
+          "border-warn/25 bg-warn/10 text-warn",
       },
     },
     defaultVariants: {

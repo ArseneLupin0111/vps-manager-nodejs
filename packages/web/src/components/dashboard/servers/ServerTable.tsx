@@ -80,17 +80,17 @@ export function ServerTable({
   return (
     <>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[13px]">
           <thead>
-            <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-white/50">
-              <th className="px-3 py-2.5 font-normal">Name</th>
-              <th className="px-3 py-2.5 font-normal">Host</th>
-              <th className="px-3 py-2.5 font-normal">Location</th>
-              <th className="px-3 py-2.5 font-normal">Host status</th>
-              <th className="px-3 py-2.5 font-normal">Agent</th>
-              <th className="px-3 py-2.5 font-normal">Access</th>
-              <th className="px-3 py-2.5 font-normal">Last seen</th>
-              <th className="px-3 py-2.5 font-normal">Actions</th>
+            <tr className="border-b border-line text-left text-[11px] uppercase tracking-[0.14em] text-dim">
+              <th className="px-4 py-3 font-medium">Name</th>
+              <th className="px-4 py-3 font-medium">Host</th>
+              <th className="px-4 py-3 font-medium">Location</th>
+              <th className="px-4 py-3 font-medium">Host status</th>
+              <th className="px-4 py-3 font-medium">Agent</th>
+              <th className="px-4 py-3 font-medium">Access</th>
+              <th className="px-4 py-3 font-medium">Last seen</th>
+              <th className="px-4 py-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -127,42 +127,42 @@ export function ServerTable({
                 <tr
                   key={vps.id}
                   aria-label={`Server ${displayName}`}
-                  className="border-b border-white/5 transition-colors hover:bg-white/[0.02]"
+                  className="border-b border-line transition-colors hover:bg-raised"
                 >
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-3">
                     <Link
                       to={`/vps/${encodeURIComponent(vps.id)}`}
-                      className="font-normal text-[#ffffff] hover:text-white/80"
+                      className="font-medium text-text transition-colors hover:text-signal"
                       title={hostId ? `Host ID: ${hostId}` : undefined}
                     >
                       {displayName}
                     </Link>
                   </td>
-                  <td className="px-3 py-3 text-white/70">
-                    <span className="block max-w-52 truncate font-mono text-white/80" title={`${vps.host}:${vps.port}`}>{vps.host}:{vps.port}</span>
-                    <span className="mt-0.5 block text-xs text-white/40">{vps.username}</span>
+                  <td className="px-4 py-3">
+                    <span className="tnum block max-w-52 truncate font-mono text-text" title={`${vps.host}:${vps.port}`}>{vps.host}:{vps.port}</span>
+                    <span className="mt-0.5 block text-[12px] text-dim">{vps.username}</span>
                   </td>
-                  <td className="px-3 py-3 text-white/60">
+                  <td className="px-4 py-3 text-dim">
                     <span className="block max-w-40 truncate" title={[vps.city, vps.country].filter(Boolean).join(", ") || "Location not detected"}>
                       {[vps.city, vps.country].filter(Boolean).join(", ") || "Location not detected"}
                     </span>
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-3">
                     <TableStatus kind="host" label={serverStatusLabel(vps.status)} tone={vps.status === "healthy" ? "green" : vps.status === "warning" ? "amber" : vps.status === "unreachable" ? "red" : "neutral"} />
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-3">
                     {agentActionRunning ? <AgentLifecycleStatus vps={vps} jobs={serverJobs} compact /> : <TableStatus kind="agent" label={agentLabel} tone={agentTone} />}
                     {isLocal ? <div className="mt-1"><LocalAgentUpdate vps={vps} variant="table" /></div> : null}
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-3">
                     <Badge variant={isReady ? "ready" : "pending"}>
                       {isLocal ? "Local" : isReady ? "Key ready" : "Needs password"}
                     </Badge>
                   </td>
-                  <td className="px-3 py-3 text-white/50">
+                  <td className="px-4 py-3 text-dim">
                     <span title={exactTimestamp(vps.lastSeenAt)}>{relativeTime(vps.lastSeenAt, now)}</span>
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Link to={`/vps/${encodeURIComponent(vps.id)}`}>
                         <Button
@@ -293,8 +293,9 @@ export function ServerTable({
 }
 
 function TableStatus({ kind, label, tone }: { kind: "host" | "agent"; label: string; tone: "green" | "amber" | "red" | "neutral" }) {
-  const color = tone === "green" ? "bg-emerald-400 text-emerald-200" : tone === "amber" ? "bg-amber-400 text-amber-200" : tone === "red" ? "bg-red-400 text-red-200" : "bg-white/40 text-white/55";
-  return <span className={`inline-flex items-center gap-1.5 text-xs ${color.split(" ").slice(1).join(" ")}`} aria-label={`${kind === "host" ? "Host" : "Agent"} status: ${label}`}><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${color.split(" ")[0]}`} /><span aria-hidden="true">{label}</span></span>;
+  const dot = tone === "green" ? "bg-signal" : tone === "amber" ? "bg-warn" : tone === "red" ? "bg-crit" : "bg-dim";
+  const text = tone === "green" ? "text-signal" : tone === "amber" ? "text-warn" : tone === "red" ? "text-crit" : "text-dim";
+  return <span className={`inline-flex items-center gap-1.5 text-[12px] ${text}`} aria-label={`${kind === "host" ? "Host" : "Agent"} status: ${label}`}><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${dot}`} /><span aria-hidden="true">{label}</span></span>;
 }
 
 export function relativeTime(value: string | undefined, now: number) {

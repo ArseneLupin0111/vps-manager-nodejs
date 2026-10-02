@@ -21,6 +21,9 @@ import type { DashboardOverview } from "../../../lib/api";
 import { EmptyState } from "../shared/EmptyState";
 import { SummaryPill } from "../shared/SummaryPill";
 
+const selectClassName =
+  "h-9 w-full rounded-none border border-line bg-ink px-3 text-[13px] text-text outline-none transition focus:border-signal focus:outline-none";
+
 export function JobsPanel({
   jobs,
   compact = false,
@@ -64,12 +67,10 @@ export function JobsPanel({
 
   if (compact) {
     return (
-      <Card className="min-w-0 max-w-full overflow-hidden border-white/10">
-        <CardHeader className="min-w-0 p-4 pb-3 sm:p-5 sm:pb-4">
+      <Card className="min-w-0 max-w-full overflow-hidden">
+        <CardHeader className="min-w-0 border-b border-line p-4 pb-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle className="truncate text-xl font-normal">
-              Recent jobs
-            </CardTitle>
+            <CardTitle className="truncate">Recent jobs</CardTitle>
             <Badge
               variant={failed ? "destructive" : running ? "pending" : "outline"}
             >
@@ -77,13 +78,17 @@ export function JobsPanel({
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="grid min-w-0 max-w-full gap-3 overflow-hidden p-4 pt-0 sm:p-5 sm:pt-0">
+        <CardContent className="min-w-0 overflow-hidden p-0">
           {jobs.length ? (
-            jobs
-              .slice(0, 5)
-              .map((job) => <CompactJobRow key={job.id} job={job} />)
+            <div className="divide-y divide-line">
+              {jobs
+                .slice(0, 5)
+                .map((job) => <CompactJobRow key={job.id} job={job} />)}
+            </div>
           ) : (
-            <EmptyState>No jobs yet.</EmptyState>
+            <div className="p-4">
+              <EmptyState>No jobs yet.</EmptyState>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -91,22 +96,25 @@ export function JobsPanel({
   }
 
   return (
-    <Card className="min-w-0 max-w-full overflow-hidden border-white/10 bg-white/[0.03] shadow-none">
-      <CardHeader className="min-w-0 p-4 pb-3 sm:p-5 sm:pb-4">
+    <Card className="min-w-0 max-w-full overflow-hidden">
+      <CardHeader className="min-w-0 border-b border-line p-4 pb-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <CardTitle className="truncate text-xl font-normal">Jobs</CardTitle>
+            <CardTitle className="truncate">Jobs</CardTitle>
             <CardDescription>
               Background work across provisioning, metrics, and key checks.
             </CardDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <div className="flex items-center gap-1 rounded-none border border-white/10 bg-white/[0.03] p-1 shadow-none">
+            <div
+              role="group"
+              aria-label="Job view style"
+              className="flex items-center gap-1 border border-line p-1"
+            >
               <Button
                 type="button"
                 variant={viewMode === "compact" ? "secondary" : "ghost"}
                 size="sm"
-                className="h-9 rounded-none px-3 text-xs font-normal"
                 onClick={() => setViewMode("compact")}
               >
                 Compact view
@@ -115,26 +123,20 @@ export function JobsPanel({
                 type="button"
                 variant={viewMode === "detailed" ? "secondary" : "ghost"}
                 size="sm"
-                className="h-9 rounded-none px-3 text-xs font-normal"
                 onClick={() => setViewMode("detailed")}
               >
                 Detailed view
               </Button>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="ml-1 rounded-none border-white/10 bg-white/[0.03] text-sm font-normal shadow-none"
-            >
+            <Button type="button" variant="outline" size="sm" className="ml-1">
               Logs
             </Button>
           </div>
         </div>
       </CardHeader>
-      <CardContent className="grid min-w-0 max-w-full gap-4 overflow-hidden p-4 pt-0 sm:p-5 sm:pt-0">
+      <CardContent className="min-w-0 overflow-hidden p-0">
         <section
-          className="grid gap-3 rounded-none border-0 bg-white/[0.03] shadow-none p-3 md:grid-cols-[minmax(0,1fr)_170px_190px]"
+          className="grid gap-3 border-b border-line p-4 md:grid-cols-[minmax(0,1fr)_170px_190px]"
           aria-label="Jobs filters"
         >
           <Input
@@ -145,7 +147,7 @@ export function JobsPanel({
           />
           <select
             aria-label="Filter job status"
-            className="h-10 rounded-none border-0 bg-white/[0.03] shadow-none px-3 text-sm font-normal text-white/70 outline-none focus:ring-4 focus:ring-ring"
+            className={selectClassName}
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
           >
@@ -157,7 +159,7 @@ export function JobsPanel({
           </select>
           <select
             aria-label="Filter job type"
-            className="h-10 rounded-none border-0 bg-white/[0.03] shadow-none px-3 text-sm font-normal text-white/70 outline-none focus:ring-4 focus:ring-ring"
+            className={selectClassName}
             value={typeFilter}
             onChange={(event) => setTypeFilter(event.target.value)}
           >
@@ -170,7 +172,7 @@ export function JobsPanel({
           </select>
         </section>
         {visibleJobs.length ? (
-          <div className="grid gap-2">
+          <div className="divide-y divide-line">
             {visibleJobs.map((job) =>
               viewMode === "compact" ? (
                 <JobCompactListRow key={job.id} job={job} />
@@ -180,10 +182,12 @@ export function JobsPanel({
             )}
           </div>
         ) : (
-          <EmptyState>No jobs match these filters.</EmptyState>
+          <div className="p-4">
+            <EmptyState>No jobs match these filters.</EmptyState>
+          </div>
         )}
         <section
-          className="grid grid-cols-1 gap-3 border-t border-white/10 pt-4 sm:grid-cols-2 xl:grid-cols-5"
+          className="grid grid-cols-1 gap-3 border-t border-line p-4 sm:grid-cols-2 xl:grid-cols-5"
           aria-label="Jobs summary"
         >
           <SummaryPill label="Workers" value={`${workers || 0}`} />
@@ -207,17 +211,17 @@ export function JobsPanel({
 function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
   const progress = Math.min(100, Math.max(0, job.progress));
   return (
-    <article className="grid min-w-0 gap-2 rounded-none border-0 bg-white/[0.03] shadow-none p-3 shadow-none">
+    <article className="grid min-w-0 gap-2 px-4 py-3 transition-colors hover:bg-raised">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <strong
-            className="block truncate text-[17px] font-normal leading-6 text-[#ffffff]"
+            className="block truncate text-[15px] font-medium leading-6 text-text"
             title={job.type}
           >
             {job.type}
           </strong>
           <p
-            className="mt-1 truncate text-[15px] font-normal leading-6 text-white/50"
+            className="mt-1 truncate text-[13px] leading-6 text-dim"
             title={`${job.vpsId} \u00b7 ${progress}% progress`}
           >
             {job.vpsId} · {job.workerId || "Worker n/a"} · {progress}% progress
@@ -227,9 +231,16 @@ function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
           {job.status}
         </Badge>
       </div>
-      <div className="h-2 overflow-hidden rounded-none bg-white/[0.03]">
+      <div
+        className="h-1 overflow-hidden bg-line"
+        role="progressbar"
+        aria-label={`${job.type} progress`}
+        aria-valuenow={progress}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div
-          className="h-full rounded-none bg-white/[0.03]"
+          className={`h-full ${job.status === "failed" ? "bg-crit" : "bg-signal"}`}
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -260,42 +271,44 @@ function JobCompactListRow({
     .filter(Boolean)
     .join(" \u00b7 ");
   return (
-    <article
-      className={`grid min-w-0 gap-2 rounded-none border px-3 py-2.5 shadow-none md:grid-cols-[minmax(0,1fr)_auto] md:items-center ${isFailed ? "border-white/10 bg-white/[0.03]" : isRunning ? "border-white/10 bg-white/[0.03]/40 ring-1 ring-white/10" : "border-white/10 bg-white/[0.03]"}`}
-    >
+    <article className="grid min-w-0 gap-2 px-4 py-3 transition-colors hover:bg-raised md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <strong
-            className="truncate text-[15px] font-normal text-[#ffffff]"
+            className="truncate text-[14px] font-medium text-text"
             title={job.type}
           >
             {job.type}
           </strong>
           <JobStatusBadge status={job.status} />
-          <span className="truncate font-mono text-[11px] font-normal text-white/30">
+          <span className="tnum truncate font-mono text-[11px] text-dim">
             {job.id}
           </span>
         </div>
-        <p
-          className="mt-1 truncate text-xs font-normal text-white/50"
-          title={meta}
-        >
+        <p className="mt-1 truncate text-[12px] text-dim" title={meta}>
           {meta}
         </p>
         {isQueued ? (
-          <p className="mt-1 text-xs font-normal text-white/50">
+          <p className="mt-1 text-[12px] text-dim">
             Queued / {job.outputPreview || "Waiting for an available worker."}
           </p>
         ) : null}
         {isFailed && job.errorMessage ? (
-          <p className="mt-1 line-clamp-2 text-xs font-normal text-white/70">
+          <p className="mt-1 line-clamp-2 text-[12px] text-text">
             {job.errorMessage}
           </p>
         ) : null}
         {!isQueued ? (
-          <div className="mt-2 h-1.5 overflow-hidden rounded-none bg-white/[0.03]">
+          <div
+            className="mt-2 h-1 overflow-hidden bg-line"
+            role="progressbar"
+            aria-label={`${job.type} progress`}
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <div
-              className={`h-full rounded-none ${isFailed ? "bg-[#1f2228]" : isRunning ? "bg-[#1f2228]" : "bg-neutral-400"}`}
+              className={`h-full ${isFailed ? "bg-crit" : "bg-signal"}`}
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -303,7 +316,7 @@ function JobCompactListRow({
       </div>
       <div className="flex flex-wrap items-center gap-2 md:justify-end">
         {!isQueued ? (
-          <span className="min-w-12 text-right text-xs font-normal text-white/50">
+          <span className="tnum min-w-12 text-right text-[12px] text-dim">
             {progress}%
           </span>
         ) : null}
@@ -315,7 +328,6 @@ function JobCompactListRow({
               isFailed ? "destructive" : isRunning ? "secondary" : "outline"
             }
             size="sm"
-            className={`h-8 rounded-none text-xs font-normal ${isRunning ? "border-0 bg-white/[0.03] shadow-none text-[#ffffff] hover:bg-white/[0.03]" : ""}`}
           >
             <a href={job.errorLogUrl} target="_blank" rel="noopener noreferrer">
               View log
@@ -323,13 +335,7 @@ function JobCompactListRow({
           </Button>
         ) : null}
         {isRunning ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-none text-xs font-normal"
-            disabled
-          >
+          <Button type="button" variant="outline" size="sm" disabled>
             Cancel
           </Button>
         ) : null}
@@ -338,7 +344,7 @@ function JobCompactListRow({
             type="button"
             variant="outline"
             size="sm"
-            className="h-8 rounded-none border-white/10 text-xs font-normal text-white/70"
+            className="text-crit hover:border-crit hover:bg-crit/10"
             disabled
           >
             Retry
@@ -372,26 +378,22 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
     ...timeBits,
   ].join(" \u00b7 ");
   return (
-    <article
-      className={`grid min-w-0 gap-3 rounded-none border p-4 shadow-none ${isFailed ? "border-white/10 bg-white/[0.03]/60 ring-1 ring-white/10" : "border-white/10 bg-white/[0.03]"}`}
-    >
+    <article className="grid min-w-0 gap-3 px-4 py-4 transition-colors hover:bg-raised">
       <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <strong
-              className="truncate text-lg font-normal leading-6 text-[#ffffff]"
+              className="truncate text-[16px] font-medium leading-6 text-text"
               title={job.type}
             >
               {job.type}
             </strong>
             <JobStatusBadge status={job.status} />
           </div>
-          <p className="mt-1 break-all font-mono text-xs font-normal text-white/50">
+          <p className="tnum mt-1 break-all font-mono text-[11px] text-dim">
             {job.id}
           </p>
-          <p className="mt-2 text-sm font-normal leading-5 text-white/50">
-            {inlineMeta}
-          </p>
+          <p className="mt-2 text-[13px] leading-5 text-dim">{inlineMeta}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           {job.errorLogUrl ? (
@@ -402,7 +404,6 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
                 isFailed ? "destructive" : isRunning ? "secondary" : "outline"
               }
               size="sm"
-              className={`rounded-none ${isRunning ? "border-0 bg-white/[0.03] shadow-none text-[#ffffff] hover:bg-white/[0.03]" : ""}`}
             >
               <a
                 href={job.errorLogUrl}
@@ -413,13 +414,7 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
               </a>
             </Button>
           ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="rounded-none"
-              disabled
-            >
+            <Button type="button" variant="outline" size="sm" disabled>
               View log
             </Button>
           )}
@@ -428,7 +423,6 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
               type="button"
               variant="outline"
               size="sm"
-              className="rounded-none"
               disabled
               title="Cancel is not wired to an API yet"
             >
@@ -440,7 +434,7 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
               type="button"
               variant="outline"
               size="sm"
-              className="rounded-none border-white/10 text-white/70 hover:bg-white/[0.03]"
+              className="text-crit hover:border-crit hover:bg-crit/10"
               disabled
               title="Retry is not wired to an API yet"
             >
@@ -451,29 +445,36 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
         </div>
       </div>
       {isQueued ? (
-        <p className="rounded-none border-0 bg-white/[0.03] shadow-none px-3 py-2 text-sm font-normal leading-5 text-white/50">
+        <p className="border border-line bg-ink px-3 py-2 text-[13px] leading-5 text-dim">
           Queued / {job.outputPreview || "Waiting for an available worker."}
         </p>
       ) : (
         <div>
-          <div className="flex items-center justify-between gap-3 text-xs font-normal uppercase tracking-[0.08em] text-white/50">
+          <div className="flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.14em] text-dim">
             <span>Progress</span>
-            <span>{progress}%</span>
+            <span className="tnum">{progress}%</span>
           </div>
-          <div className="mt-2 h-2.5 overflow-hidden rounded-none bg-white/[0.03]">
+          <div
+            className="mt-2 h-1 overflow-hidden bg-line"
+            role="progressbar"
+            aria-label={`${job.type} progress`}
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <div
-              className={`h-full rounded-none ${isFailed ? "bg-[#1f2228]" : isRunning ? "bg-[#1f2228]" : "bg-white/[0.03]"}`}
+              className={`h-full ${isFailed ? "bg-crit" : "bg-signal"}`}
               style={{ width: `${progress}%` }}
             />
           </div>
         </div>
       )}
       {job.errorMessage ? (
-        <p className="rounded-none border-0 bg-white/[0.03] shadow-none px-3 py-2 text-sm font-normal leading-5 text-white/70">
+        <p className="border border-line bg-ink px-3 py-2 text-[13px] leading-5 text-text">
           {job.errorMessage}
         </p>
       ) : job.outputPreview && !isQueued ? (
-        <p className="rounded-none border-0 bg-white/[0.03] shadow-none px-3 py-2 text-sm font-normal leading-5 text-white/50">
+        <p className="border border-line bg-ink px-3 py-2 text-[13px] leading-5 text-dim">
           {job.outputPreview}
         </p>
       ) : null}
@@ -488,8 +489,8 @@ function JobStatusBadge({
 }) {
   if (status === "running")
     return (
-      <span className="inline-flex items-center gap-1 rounded-none border border-white/10 bg-white/[0.03] px-2 py-0.5 text-xs font-normal uppercase text-white/70">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-none bg-white/[0.03]" />
+      <span className="inline-flex items-center gap-1.5 border border-info/40 bg-info/10 px-2 py-1 font-mono text-[10px] font-medium uppercase leading-none tracking-[0.06em] text-info">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
         Running
       </span>
     );
@@ -508,16 +509,13 @@ function JobOverflow({ job }: { job: DashboardOverview["jobs"][number] }) {
           type="button"
           variant="outline"
           size="sm"
-          className="h-8 rounded-none px-2"
+          className="h-8 px-2"
           aria-label={`More actions for ${job.id}`}
         >
           <MoreHorizontal size={15} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="z-[80] w-44 rounded-none border-0 bg-white/[0.03] shadow-none shadow-none shadow-black/20"
-      >
+      <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuItem disabled className="opacity-45">
           Restart worker
         </DropdownMenuItem>
