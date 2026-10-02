@@ -418,7 +418,7 @@ describe("React dashboard", () => {
     );
     await userEvent.type(displayNameInput, "Production Singapore");
     await userEvent.type(screen.getByLabelText("Name"), "prod");
-    await userEvent.type(screen.getByLabelText(/Host/i), "203.0.113.20");
+    await userEvent.type(screen.getByLabelText(/Host/i, { selector: "input" }), "203.0.113.20");
     await userEvent.type(screen.getByLabelText(/Username/i), "root");
     await userEvent.type(
       screen.getByLabelText(/Optional password/i),
@@ -1255,10 +1255,9 @@ describe("React dashboard", () => {
 
       renderApp(["/vps"]);
 
-      expect(await screen.findByText("Local Server")).toBeInTheDocument();
-      expect(screen.getByText("127.0.0.1:22")).toBeInTheDocument();
+      expect(await screen.findByText("127.0.0.1:22")).toBeInTheDocument();
       expect(screen.getByText("Host ID: 3e6f37c57a5f")).toBeInTheDocument();
-      expect(screen.getByText("Friendly production")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Friendly production" })).toBeInTheDocument();
       expect(screen.queryByText("generated-name")).not.toBeInTheDocument();
       const localCard = screen.getByRole("article", { name: "Server Local Server" });
       const remoteCard = screen.getByRole("article", { name: "Server Friendly production" });
@@ -1285,7 +1284,6 @@ describe("React dashboard", () => {
       expect(screen.getByText("Host status")).toBeInTheDocument();
       expect(screen.getAllByText("Agent").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Access").length).toBeGreaterThan(0);
-      expect(screen.getByText("Local Server")).toBeInTheDocument();
       expect(screen.queryByText("Host ID: 3e6f37c57a5f")).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Local Server" })).toHaveAttribute("title", "Host ID: 3e6f37c57a5f");
       expect(screen.getByLabelText("Host status: Unknown")).toBeInTheDocument();
@@ -2270,11 +2268,10 @@ describe("React dashboard", () => {
 
       expect(await screen.findByText("Singapore, Singapore")).toBeInTheDocument();
       expect(screen.getByText("Location not detected")).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("Search name, host, provider, city, country, tag...")).toBeInTheDocument();
 
       await user.type(screen.getByLabelText("Search servers"), "singapore");
       expect(screen.getByRole("heading", { name: "Production API" })).toBeInTheDocument();
-      expect(screen.queryByText("Backup")).not.toBeInTheDocument();
+      expect(screen.queryByRole("article", { name: "Server Backup" })).not.toBeInTheDocument();
 
       await user.clear(screen.getByLabelText("Search servers"));
       await user.click(screen.getByRole("button", { name: "Table view" }));

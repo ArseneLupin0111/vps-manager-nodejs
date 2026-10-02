@@ -311,7 +311,7 @@ function MetricStat({
   );
 }
 
-function ChartPanel({
+export function ChartPanel({
   title,
   hint,
   series,

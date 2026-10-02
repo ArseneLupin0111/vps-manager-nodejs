@@ -19,6 +19,8 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { cn } from "../../lib/utils";
+import { FleetSidebar } from "./FleetSidebar";
+import type { DashboardOverview, VpsRecord } from "../../lib/api";
 
 export type LiveConnectionState =
   | { status: "connecting" }
@@ -33,6 +35,8 @@ type Props = {
   onRefresh: () => void;
   onLogout?: () => void;
   workspaceName?: string;
+  hosts: VpsRecord[];
+  metrics: DashboardOverview["metrics"];
   children: ReactNode;
 };
 
@@ -43,6 +47,8 @@ export function DashboardShell({
   onRefresh,
   onLogout,
   workspaceName,
+  hosts,
+  metrics,
   children,
 }: Props) {
   const { pathname } = useLocation();
@@ -59,8 +65,10 @@ export function DashboardShell({
         : "Dashboard";
 
   return (
-    <main className="min-h-screen w-full bg-ink text-text">
-      <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-line bg-ink/90 px-4 backdrop-blur sm:px-6">
+    <main className="min-h-screen w-full bg-ink text-text lg:flex">
+      <FleetSidebar hosts={hosts} metrics={metrics} selectedHostId={isWorkspace ? pathname.split("/")[2] : undefined} />
+      <div className="min-w-0 flex-1">
+      <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-line bg-ink px-4 sm:px-6">
         <nav
           aria-label="Dashboard context"
           className="flex min-w-0 flex-1 items-center gap-2 text-[13px] sm:gap-3"
@@ -119,11 +127,12 @@ export function DashboardShell({
 
       <div
         className={cn(
-          "mx-auto w-full max-w-[1280px] px-4 pb-12 sm:px-6",
-          isWorkspace ? "pt-6" : "pt-6 sm:pt-8",
+          "w-full px-4 pb-12 sm:px-6",
+          isWorkspace ? "pt-5" : "pt-6",
         )}
       >
         {children}
+      </div>
       </div>
     </main>
   );

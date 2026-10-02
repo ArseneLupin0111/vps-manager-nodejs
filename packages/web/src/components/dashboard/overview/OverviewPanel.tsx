@@ -3,6 +3,9 @@ import type { DashboardOverview } from "../../../lib/api";
 import { formatBytes } from "../shared/formatBytes";
 import { AuditPanel } from "../audit/AuditPanel";
 import { JobsPanel } from "../jobs/JobsPanel";
+import { ResourceGauge } from "../shared/ResourceGauge";
+import { SystemFacts } from "../shared/SystemFacts";
+import { ChartPanel } from "../metrics/MetricsPanel";
 
 export function DemoBanner({ overview }: { overview: DashboardOverview }) {
   if (!overview.banner) return null;
@@ -80,18 +83,8 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
   const cpuPct = metric?.cpu;
   const ramPct = metric?.memory;
   const diskPct = metric?.disk;
-  const fmtPct = (value?: number) =>
-    typeof value === "number" && Number.isFinite(value)
-      ? `${value.toFixed(1)}%`
-      : "n/a";
-  const pctTone = (value?: number): KpiTone =>
-    typeof value !== "number" || !Number.isFinite(value)
-      ? "idle"
-      : value >= 85
-        ? "crit"
-        : value >= 70
-          ? "warn"
-          : "ok";
+  const cpuHistory = overview.metrics.find((sample) => sample.trend?.unit === "cpu") ?? null;
+  const memoryHistory = overview.metrics.find((sample) => sample.trend?.unit === "memory") ?? null;
 
   const containersValue = docker?.available
     ? `${docker.containerRunning}/${docker.containerTotal}`
@@ -131,79 +124,38 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
   ];
 
   return (
-    <div className="grid min-w-0 gap-6">
+    <div className="grid min-w-0 gap-4">
       <DemoBanner overview={overview} />
-
-      {/* Exactly 5 KPIs: status → CPU → RAM → disk → containers */}
-      <section
-        className="grid min-w-0 grid-cols-5 gap-3 max-[1000px]:grid-cols-2"
-        aria-label="Server overview"
-      >
-        <Kpi
-          label="Status"
-          value={statusValue}
-          sub={server ? (server.provider || "Provider not set") : "No server data"}
-          tone={statusTone}
-        />
-        <Kpi
-          label="CPU"
-          value={fmtPct(cpuPct)}
-          sub={sysInfo?.cpu?.model || "Awaiting snapshot"}
-          tone={pctTone(cpuPct)}
-        />
-        <Kpi
-          label="RAM"
-          value={fmtPct(ramPct)}
-          sub={sysInfo?.memory?.totalBytes ? `${formatBytes(sysInfo.memory.totalBytes)} total` : "Awaiting snapshot"}
-          tone={pctTone(ramPct)}
-        />
-        <Kpi
-          label="Disk"
-          value={fmtPct(diskPct)}
-          sub={sysInfo?.rootDisk?.totalBytes ? `${formatBytes(sysInfo.rootDisk.totalBytes)} total` : "Awaiting snapshot"}
-          tone={pctTone(diskPct)}
-        />
-        <Kpi
-          label="Containers"
-          value={containersValue}
-          sub={docker?.available ? "Running / total" : "Docker snapshot inactive"}
-          tone={containersTone}
-        />
+      <section className="grid grid-cols-2 gap-3" aria-label="Server status">
+        <Kpi label="Status" value={statusValue} sub={server?.provider || "Provider not set"} tone={statusTone} />
+        <Kpi label="Containers" value={containersValue} sub={docker?.available ? "Running / total" : "Docker snapshot inactive"} tone={containersTone} />
       </section>
+      <section className="grid min-w-0 gap-px border border-line bg-line md:grid-cols-3" aria-label="Server overview">
+        <ResourceGauge label="CPU" value={cpuPct} detail={sysInfo?.cpu?.model || "Awaiting snapshot"} />
+        <ResourceGauge label="Memory" value={ramPct} detail={sysInfo?.memory?.totalBytes ? `${formatBytes(sysInfo.memory.totalBytes)} total` : "Awaiting snapshot"} />
+        <ResourceGauge label="Disk /" value={diskPct} detail={sysInfo?.rootDisk?.totalBytes ? `${formatBytes(sysInfo.rootDisk.totalBytes)} total` : "Awaiting snapshot"} />
+      </section>
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <ChartPanel title="CPU & Memory" hint="Agent-reported utilization history" series={[
+          { key: "cpu", name: "CPU", color: "hsl(var(--telemetry-cpu))", metric: cpuHistory },
+          { key: "memory", name: "RAM", color: "hsl(var(--telemetry-memory))", metric: memoryHistory },
+        ]} />
+        <ChartPanel title="Network I/O" hint="Cumulative bytes reported by the agent · not throughput" series={[
+          { key: "rx", name: "RX", color: "hsl(var(--telemetry-rx))", metric: null },
+          { key: "tx", name: "TX", color: "hsl(var(--telemetry-tx))", metric: null },
+        ]} readouts={[
+          { label: "RX", value: metric && Number.isFinite(metric.networkRx) ? formatBytes(metric.networkRx) : "n/a" },
+          { label: "TX", value: metric && Number.isFinite(metric.networkTx) ? formatBytes(metric.networkTx) : "n/a" },
+        ]} />
+      </div>
+      <SystemFacts facts={sysCells} />
 
       {/* Audit / jobs split */}
-      <div className="grid min-w-0 grid-cols-[1.5fr_1fr] gap-6 max-[1000px]:grid-cols-1">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[1.5fr_1fr]">
         <AuditPanel events={overview.auditEvents.slice(0, 5)} compact />
         <JobsPanel jobs={overview.jobs.slice(0, 5)} compact />
       </div>
 
-      {/* System panel, 4 cells */}
-      <section
-        className="min-w-0 border border-line bg-panel"
-        aria-label="System details"
-      >
-        <div className="border-b border-line px-4 py-3">
-          <h2 className="text-[14px] font-semibold">System</h2>
-          <p className="mt-0.5 text-[12px] text-dim">
-            Reported facts for this server, no estimates.
-          </p>
-        </div>
-        <dl className="grid min-w-0 grid-cols-4 gap-px bg-line max-[1000px]:grid-cols-2">
-          {sysCells.map((cell) => (
-            <div key={cell.label} className="min-w-0 bg-panel p-4">
-              <dt className="truncate text-[11px] uppercase tracking-[0.14em] text-dim">
-                {cell.label}
-              </dt>
-              <dd
-                className="tnum mt-1.5 truncate text-[13px] text-text"
-                title={cell.value}
-              >
-                {cell.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </section>
     </div>
   );
 }

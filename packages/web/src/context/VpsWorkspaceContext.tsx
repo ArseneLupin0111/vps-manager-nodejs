@@ -233,10 +233,7 @@ export function VpsWorkspaceLayout() {
           Server list
         </Link>
 
-        <div className="mt-4 flex min-w-0 items-center gap-4">
-          <span className="grid h-12 w-12 shrink-0 place-items-center border border-line bg-panel text-dim">
-            <Server size={22} aria-hidden="true" />
-          </span>
+        <div className="mt-2 flex min-w-0 items-center gap-4">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
               <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-text">
@@ -250,7 +247,7 @@ export function VpsWorkspaceLayout() {
           </div>
         </div>
 
-        <div className="mt-6 overflow-x-auto border-b border-line [scrollbar-width:thin]">
+        <div className="mt-4 overflow-x-auto border-b border-line [scrollbar-width:thin]">
           <nav
             aria-label={`${displayName} workspace sections`}
             className="flex w-max min-w-full items-center"
@@ -264,7 +261,7 @@ export function VpsWorkspaceLayout() {
                   [
                     "-mb-px inline-flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-4 py-3 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal",
                     isActive
-                      ? "border-signal text-text"
+                      ? "border-signal text-signal"
                       : "border-transparent text-dim hover:text-text",
                   ].join(" ")
                 }

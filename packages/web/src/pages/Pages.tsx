@@ -28,6 +28,8 @@ export function DashboardLayout() {
       onRefresh={ctx.onRefresh}
       onLogout={ctx.onLogout}
       workspaceName={workspaceName}
+      hosts={ctx.records}
+      metrics={ctx.metrics}
     >
       <Outlet />
     </DashboardShell>
