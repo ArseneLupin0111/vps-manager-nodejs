@@ -104,9 +104,24 @@ export type DashboardOverview = {
     loadAverage: number;
     networkRx: number;
     networkTx: number;
+    /**
+     * Explicit unit of `networkRx`/`networkTx` on this row. Absent means the
+     * unit is unknown (legacy rows): render network readouts as "n/a" —
+     * never guess a unit from the sample source.
+     */
+    networkUnit?: "bytes/s";
+    /** False: network counters were unavailable (first/reset sample). */
+    networkAvailable?: boolean;
     uptime: number;
     collectedAt: string;
     freshness: "fresh" | "stale";
+    /**
+     * Bounded per-host sample window projected at read time (<=120 points,
+     * chronological). cpu/memory are percentages; networkRx/networkTx are
+     * bytes per second or null where the sample was unavailable. Absent when
+     * the backend has no samples for this host.
+     */
+    history?: MetricHistory;
     trend?: {
       range: string;
       points: number[];
@@ -200,6 +215,15 @@ export type DashboardOverview = {
 };
 
 export type DashboardMetric = DashboardOverview["metrics"][number];
+export type MetricHistoryPoint = { t: string; value: number | null };
+export type MetricHistory = {
+  timestamps: string[];
+  cpu: number[];
+  memory: number[];
+  networkRx: Array<number | null>;
+  networkTx: Array<number | null>;
+  networkUnit: "bytes/s";
+};
 export type DashboardSystemInfo = DashboardOverview["systemInfo"][number];
 export type { DashboardDockerMetrics as DashboardDockerMetric };
 export type DashboardJob = DashboardOverview["jobs"][number];

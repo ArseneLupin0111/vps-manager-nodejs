@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { getDemoMetrics } from "../demo/demo-fixtures.js";
 import type { MetricSample } from "../metrics/metrics.models.js";
+import { withHistory } from "./metric-history.js";
 import type { MetricRepository } from "../persistence/repositories/metric.repository.js";
 import type { PaginationParams } from "../common/pagination.js";
 import { APP_CONFIG, METRIC_REPOSITORY } from "../tokens.js";
@@ -59,14 +60,29 @@ export class MetricService {
 
     if (vpsId) {
       const result = await this.metricRepository.getLatest(vpsId);
-      return result ? [withFreshness(result)] : [];
+      if (!result) return [];
+      const window = await this.metricRepository.listWindow(
+        vpsId,
+        this.config.metricWindowLimit,
+      );
+      return [withFreshness(withHistory(result, window, this.config.metricWindowLimit))];
     }
 
-    return (await this.metricRepository.listLatest(page)).map(withFreshness);
+    const latest = await this.metricRepository.listLatest(page);
+    const metricList = await Promise.all(
+      latest.map(async (sample) => {
+        const window = await this.metricRepository.listWindow(
+          sample.vpsId,
+          this.config.metricWindowLimit,
+        );
+        return withHistory(sample, window, this.config.metricWindowLimit);
+      }),
+    );
+    return metricList.map(withFreshness);
   }
 
   async append(sample: MetricSample): Promise<MetricSample> {
-    return this.metricRepository.append(sample);
+    return this.metricRepository.append(sample, this.config.metricWindowLimit);
   }
 
   async listLatest(vpsId?: string): Promise<MetricSample[]> {

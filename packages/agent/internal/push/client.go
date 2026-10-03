@@ -133,22 +133,30 @@ func NewClient(cfg *config.Config) *Client {
 //
 // Docker is the canonical Docker metrics payload under the single `docker` wire key.
 type payload struct {
-	VpsId        string              `json:"vpsId,omitempty"`
-	CollectedAt  string              `json:"collectedAt"`
-	CPU          float64             `json:"cpu"`
-	Memory       float64             `json:"memory"`
-	Disk         float64             `json:"disk"`
-	LoadAverage  float64             `json:"loadAverage"`
-	NetworkRx    float64             `json:"networkRx"`
-	NetworkTx    float64             `json:"networkTx"`
-	Uptime       float64             `json:"uptime"`
-	AgentVersion string              `json:"agentVersion"`
+	VpsId       string  `json:"vpsId,omitempty"`
+	CollectedAt string  `json:"collectedAt"`
+	CPU         float64 `json:"cpu"`
+	Memory      float64 `json:"memory"`
+	Disk        float64 `json:"disk"`
+	LoadAverage float64 `json:"loadAverage"`
+	NetworkRx   float64 `json:"networkRx"`
+	NetworkTx   float64 `json:"networkTx"`
+	// NetworkUnit is always "bytes/s" for samples produced by Collect:
+	// NetworkRx/NetworkTx are throughput rates, never cumulative counters.
+	// NetworkAvailable=false marks first-sample/reset/clock-gap intervals
+	// whose 0 values must be read as gaps, never as zero observations.
+	// Unit is omitempty (legacy-shaped structs still marshal); availability
+	// has no omitempty so false survives the wire.
+	NetworkUnit      string  `json:"networkUnit,omitempty"`
+	NetworkAvailable bool    `json:"networkAvailable"`
+	Uptime           float64 `json:"uptime"`
+	AgentVersion     string  `json:"agentVersion"`
 	// BuildId is the immutable release build identity (40-hex git SHA);
 	// omitted on dev builds with unknown identity so ingest clears it.
-	BuildId   string              `json:"buildId,omitempty"`
-	System    *metrics.SystemInfo `json:"system,omitempty"`
-	Location  *metrics.Location   `json:"location,omitempty"`
-	Docker    any                 `json:"docker,omitempty"`
+	BuildId  string              `json:"buildId,omitempty"`
+	System   *metrics.SystemInfo `json:"system,omitempty"`
+	Location *metrics.Location   `json:"location,omitempty"`
+	Docker   any                 `json:"docker,omitempty"`
 }
 
 // selectDockerBranch returns the `docker` wire branch for this push: the
@@ -303,20 +311,22 @@ func (c *Client) Push(ctx context.Context, m *metrics.SystemMetrics) (*PushResul
 		location = c.location()
 	}
 	p := payload{
-		VpsId:        "", // backend derives from token
-		CollectedAt:  time.Now().UTC().Format(time.RFC3339),
-		CPU:          m.CPU,
-		Memory:       m.Memory,
-		Disk:         m.Disk,
-		LoadAverage:  m.LoadAverage,
-		NetworkRx:    m.NetworkRx,
-		NetworkTx:    m.NetworkTx,
-		Uptime:       m.Uptime,
-		AgentVersion: version.String(),
-		BuildId:      version.BuildID(),
-		System:       m.System,
-		Docker:       c.selectDockerBranch(m),
-		Location:     location,
+		VpsId:            "", // backend derives from token
+		CollectedAt:      time.Now().UTC().Format(time.RFC3339),
+		CPU:              m.CPU,
+		Memory:           m.Memory,
+		Disk:             m.Disk,
+		LoadAverage:      m.LoadAverage,
+		NetworkRx:        m.NetworkRx,
+		NetworkTx:        m.NetworkTx,
+		NetworkUnit:      m.NetworkUnit,
+		NetworkAvailable: m.NetworkAvailable,
+		Uptime:           m.Uptime,
+		AgentVersion:     version.String(),
+		BuildId:          version.BuildID(),
+		System:           m.System,
+		Docker:           c.selectDockerBranch(m),
+		Location:         location,
 	}
 
 	body, err := json.Marshal(p)

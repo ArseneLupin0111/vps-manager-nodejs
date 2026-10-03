@@ -259,4 +259,6 @@ export type AgentMetricPayload = {
   location?: { city: string; country: string; detectedAt: string };
   system?: AgentSystemInfoInput;
   docker?: AgentDockerMetricsInput;
+  networkUnit?: "bytes/s";
+  networkAvailable?: boolean;
 };

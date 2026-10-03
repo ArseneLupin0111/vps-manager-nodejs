@@ -31,6 +31,8 @@ type MetricRow = {
   source: MetricSample["source"] | null;
   agent_version: string | null;
   trend: MetricTrend | null;
+  network_unit: string | null;
+  network_available: boolean | null;
 };
 
 export function createPostgresMetricRepository(
@@ -102,8 +104,8 @@ async function insertSample(
 ): Promise<{ id: string | number | bigint | null }> {
   const result = await client.query<{ id: string | number | bigint }>(
     `INSERT INTO metric_samples (vps_id, cpu, memory, disk, load_average, network_rx, network_tx, uptime,
-      collected_at, received_at, effective_at, source, agent_version, trend)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      collected_at, received_at, effective_at, source, agent_version, trend, network_unit, network_available)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (vps_id, collected_at, effective_at) DO UPDATE SET
        cpu = EXCLUDED.cpu,
        memory = EXCLUDED.memory,
@@ -115,7 +117,9 @@ async function insertSample(
        received_at = EXCLUDED.received_at,
        source = EXCLUDED.source,
        agent_version = EXCLUDED.agent_version,
-       trend = EXCLUDED.trend
+       trend = EXCLUDED.trend,
+       network_unit = EXCLUDED.network_unit,
+       network_available = EXCLUDED.network_available
      RETURNING id`,
     metricValues(sample),
   );
@@ -129,8 +133,8 @@ async function upsertLatest(
 ) {
   await client.query(
     `INSERT INTO metric_latest (vps_id, sample_id, cpu, memory, disk, load_average, network_rx, network_tx, uptime,
-      collected_at, received_at, effective_at, source, agent_version, trend, updated_at)
-     VALUES ($1,$15,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+      collected_at, received_at, effective_at, source, agent_version, trend, network_unit, network_available, updated_at)
+     VALUES ($1,$17,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
      ON CONFLICT (vps_id) DO UPDATE SET
        sample_id = COALESCE(EXCLUDED.sample_id, metric_latest.sample_id),
        cpu = EXCLUDED.cpu,
@@ -146,6 +150,8 @@ async function upsertLatest(
        source = EXCLUDED.source,
        agent_version = EXCLUDED.agent_version,
        trend = EXCLUDED.trend,
+       network_unit = EXCLUDED.network_unit,
+       network_available = EXCLUDED.network_available,
        updated_at = now()
      WHERE metric_latest.effective_at <= EXCLUDED.effective_at`,
     [...metricValues(sample), sampleId],
@@ -169,6 +175,8 @@ function metricValues(sample: MetricSample): unknown[] {
     sample.source ?? null,
     sample.agentVersion ?? null,
     toJsonOrNull(sample.trend),
+    sample.networkUnit ?? null,
+    sample.networkAvailable ?? null,
   ];
 }
 
@@ -187,5 +195,10 @@ function rowToMetricSample(row: MetricRow): MetricSample {
     source: row.source ?? undefined,
     agentVersion: row.agent_version ?? undefined,
     trend: row.trend ?? undefined,
+    networkUnit: row.network_unit === "bytes/s" ? "bytes/s" : undefined,
+    networkAvailable:
+      row.network_available === null || row.network_available === undefined
+        ? undefined
+        : row.network_available,
   };
 }

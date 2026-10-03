@@ -260,12 +260,15 @@ func TestCollectorNetworkDelta(t *testing.T) {
 	}
 
 	// First call: no delta yet
-	rx, tx, err := c.collectNetwork()
+	rx, tx, available, err := c.collectNetwork()
 	if err != nil {
 		t.Fatalf("first collect: %v", err)
 	}
 	if rx != 0 || tx != 0 {
 		t.Errorf("first collect: rx=%.0f tx=%.0f, want 0", rx, tx)
+	}
+	if available {
+		t.Error("first collect: available = true, want false (no baseline yet)")
 	}
 
 	// Advance time by 1 second
@@ -275,7 +278,7 @@ func TestCollectorNetworkDelta(t *testing.T) {
 	// eth0 Rx: +1000, eth1 Rx: +2000, total Rx delta: 3000 (non-lo)
 	// eth0 Tx: +500, eth1 Tx: +600, total Tx delta: 1100
 	// elapsed = 1s, so rates == deltas
-	rx, tx, err = c.collectNetwork()
+	rx, tx, available, err = c.collectNetwork()
 	if err != nil {
 		t.Fatalf("second collect: %v", err)
 	}
@@ -284,6 +287,9 @@ func TestCollectorNetworkDelta(t *testing.T) {
 	}
 	if tx != 1100 {
 		t.Errorf("tx rate = %.0f bytes/sec, want 1100", tx)
+	}
+	if !available {
+		t.Error("second collect: available = false, want true (valid delta)")
 	}
 }
 
@@ -298,39 +304,152 @@ func TestCollectorNetwork_CounterReset(t *testing.T) {
 	fakeTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	timeNow = func() time.Time { return fakeTime }
 
-	const firstNetDev = `Inter-| face |bytes packets
-  eth0: 10000   100
-  lo: 1 1
+	const firstNetDev = `Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 1   1    0    0    0     0          0         0  1   1    0    0    0     0       0          0
+  eth0: 10000  100    0    0    0     0          0         0  5000   50    0    0    0     0       0          0
 `
-	const resetNetDev = `Inter-| face |bytes packets
-  eth0: 2000   50
-  lo: 1 1
+	const resetNetDev = `Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 1   1    0    0    0     0          0         0  1   1    0    0    0     0       0          0
+  eth0: 2000  50    0    0    0     0          0         0  1000   25    0    0    0     0       0          0
+`
+	const recoveredNetDev = `Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 1   1    0    0    0     0          0         0  1   1    0    0    0     0       0          0
+  eth0: 3000  60    0    0    0     0          0         0  1500   30    0    0    0     0       0          0
 `
 
 	callCount := 0
 	readProcFile = func(path string) (string, error) {
 		callCount++
-		if callCount == 1 {
+		switch callCount {
+		case 1:
 			return firstNetDev, nil
+		case 2:
+			return resetNetDev, nil
+		default:
+			return recoveredNetDev, nil
 		}
-		return resetNetDev, nil
 	}
 
-	// First collect: store baseline
-	c.collectNetwork()
+	// First collect: store baseline, unavailable
+	rx, tx, available, err := c.collectNetwork()
+	if err != nil {
+		t.Fatalf("first collect: %v", err)
+	}
+	if rx != 0 || tx != 0 {
+		t.Errorf("first collect: rx=%.0f tx=%.0f, want 0", rx, tx)
+	}
+	if available {
+		t.Error("first collect: available = true, want false (no baseline yet)")
+	}
 
 	fakeTime = fakeTime.Add(1 * time.Second)
 
-	// Second collect: counter reset (2000 < 10000 for eth0)
-	rx, tx, err := c.collectNetwork()
+	// Second collect: counter reset (rx 2000 < 10000, tx 1000 < 5000).
+	// Both directions must be suppressed as a gap, not a partial rate.
+	rx, tx, available, err = c.collectNetwork()
 	if err != nil {
 		t.Fatalf("collect after reset: %v", err)
 	}
 	if rx != 0 {
-		t.Errorf("expected 0 on counter reset, got %.0f", rx)
+		t.Errorf("expected 0 rx on counter reset, got %.0f", rx)
 	}
 	if tx != 0 {
-		t.Errorf("expected 0 on counter reset, got %.0f", tx)
+		t.Errorf("expected 0 tx on counter reset, got %.0f", tx)
+	}
+	if available {
+		t.Error("collect after reset: available = true, want false (gap, not zero)")
+	}
+
+	fakeTime = fakeTime.Add(1 * time.Second)
+
+	// Third collect: counters advanced past the reset baseline
+	// (rx +1000, tx +500 over 1s), so rates recover cleanly.
+	rx, tx, available, err = c.collectNetwork()
+	if err != nil {
+		t.Fatalf("collect after recovery: %v", err)
+	}
+	if rx != 1000 {
+		t.Errorf("rx rate after recovery = %.0f bytes/sec, want 1000", rx)
+	}
+	if tx != 500 {
+		t.Errorf("tx rate after recovery = %.0f bytes/sec, want 500", tx)
+	}
+	if !available {
+		t.Error("collect after recovery: available = false, want true (valid delta)")
+	}
+}
+
+func TestCollectorNetwork_NonAdvancingClock(t *testing.T) {
+	c := NewCollector()
+
+	origRead := readProcFile
+	defer func() { readProcFile = origRead }()
+
+	origTime := timeNow
+	defer func() { timeNow = origTime }()
+	fakeTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	timeNow = func() time.Time { return fakeTime }
+
+	callCount := 0
+	readProcFile = func(path string) (string, error) {
+		callCount++
+		if callCount == 1 {
+			return fixtureNetDev, nil
+		}
+		return fixtureNetDevSecond, nil
+	}
+
+	// First collect: store baseline
+	if _, _, _, err := c.collectNetwork(); err != nil {
+		t.Fatalf("first collect: %v", err)
+	}
+
+	// Second collect with no time elapsed: no trustworthy rate exists.
+	// Baseline is kept so a later sample covers the full window.
+	rx, tx, available, err := c.collectNetwork()
+	if err != nil {
+		t.Fatalf("collect with elapsed<=0: %v", err)
+	}
+	if rx != 0 || tx != 0 {
+		t.Errorf("elapsed<=0: rx=%.0f tx=%.0f, want 0", rx, tx)
+	}
+	if available {
+		t.Error("elapsed<=0: available = true, want false")
+	}
+
+	// Advancing the clock now yields the delta over the full 2s window:
+	// rx 3000/2s = 1500, tx 1100/2s = 550.
+	fakeTime = fakeTime.Add(2 * time.Second)
+	rx, tx, available, err = c.collectNetwork()
+	if err != nil {
+		t.Fatalf("collect after clock advance: %v", err)
+	}
+	if rx != 1500 {
+		t.Errorf("rx rate = %.0f bytes/sec, want 1500", rx)
+	}
+	if tx != 550 {
+		t.Errorf("tx rate = %.0f bytes/sec, want 550", tx)
+	}
+	if !available {
+		t.Error("collect after clock advance: available = false, want true")
+	}
+}
+
+func TestCPUPercent_CounterReset(t *testing.T) {
+	prev, err := ReadCPUStats(fixtureProcStatTwo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	curr, err := ReadCPUStats(fixtureProcStat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// curr totals are lower than prev (simulated reset): must be 0, never wrap.
+	if pct := CPUPercent(prev, curr); pct != 0 {
+		t.Errorf("CPUPercent on counter reset = %.2f, want 0", pct)
 	}
 }
 

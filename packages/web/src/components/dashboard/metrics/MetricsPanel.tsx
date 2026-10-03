@@ -4,7 +4,17 @@ import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { chipVariant, freshnessLabel } from "../../../lib/dashboard-formatters";
 import type { DashboardOverview } from "../../../lib/api";
-import { formatBytes } from "../shared/formatBytes";
+import type { ChartSeries } from "./historySeries";
+import {
+  cpuMemorySeries,
+  formatChartTime,
+  formatNetworkPair,
+  formatThroughput,
+  formatTickValue,
+  networkSeries,
+  pickFocusMetric,
+  sumNetworkRate,
+} from "./historySeries";
 import { formatUptime } from "../shared/formatUptime";
 import { EmptyState } from "../shared/EmptyState";
 import {
@@ -51,18 +61,14 @@ export function MetricsPanel({
   const highestLoad = metrics.length
     ? [...metrics].sort((a, b) => b.loadAverage - a.loadAverage)[0]
     : null;
-  // Trend history is reported per metric with an explicit unit. Production
-  // agents only report `unit: "cpu"`; demo fixtures may report `memory` or
-  // `disk`. There is no per-series RAM or RX/TX history, so each chart series
-  // MUST match its requested unit instead of relabeling another unit's points.
-  const cpuTrendMetric =
-    metrics.find((metric) => metric.trend?.unit === "cpu") ?? null;
-  const memoryTrendMetric =
-    metrics.find((metric) => metric.trend?.unit === "memory") ?? null;
-  const networkTrendMetric =
-    metrics.find((metric) => metric.trend?.unit === "network") ?? null;
-  const totalRx = metrics.reduce((sum, metric) => sum + metric.networkRx, 0);
-  const totalTx = metrics.reduce((sum, metric) => sum + metric.networkTx, 0);
+  // History charts render one host's own `history` window: the selected
+  // host, or — for "all" — the most recently updated single host. Never a
+  // cross-host merge and never a relabeled series.
+  const chartFocus = pickFocusMetric(metrics, serverFilter);
+  const cpuMemory = cpuMemorySeries(chartFocus);
+  const netSeries = networkSeries(chartFocus);
+  const rxRate = sumNetworkRate(visibleMetrics, "networkRx");
+  const txRate = sumNetworkRate(visibleMetrics, "networkTx");
   const alerts = buildMetricAlerts(metrics);
   const focusServer =
     serverFilter === "all"
@@ -141,36 +147,24 @@ export function MetricsPanel({
       >
         <ChartPanel
           title="CPU & memory"
-          hint="Agent-reported utilization history"
-          series={[
-            {
-              key: "cpu",
-              name: "CPU",
-              color: "hsl(var(--signal))",
-              metric: cpuTrendMetric,
-            },
-            {
-              key: "memory",
-              name: "RAM",
-              color: "hsl(var(--info))",
-              metric: memoryTrendMetric,
-            },
-          ]}
+          hint={
+            chartFocus
+              ? `Utilization history · ${chartFocus.vpsId}`
+              : "Agent-reported utilization history"
+          }
+          series={cpuMemory}
         />
         <ChartPanel
           title="Network in / out"
-          hint="Agent-reported throughput"
-          series={[
-            {
-              key: "network",
-              name: "Network",
-              color: "hsl(var(--warn))",
-              metric: networkTrendMetric,
-            },
-          ]}
+          hint={
+            chartFocus
+              ? `Throughput (B/s) · ${chartFocus.vpsId}`
+              : "Agent-reported throughput (B/s)"
+          }
+          series={netSeries}
           readouts={[
-            { label: "RX", value: formatBytes(totalRx) },
-            { label: "TX", value: formatBytes(totalTx) },
+            { label: "RX", value: rxRate.known ? formatThroughput(rxRate.total) : "n/a" },
+            { label: "TX", value: txRate.known ? formatThroughput(txRate.total) : "n/a" },
           ]}
         />
       </section>
@@ -311,6 +305,8 @@ function MetricStat({
   );
 }
 
+export type { ChartSeries } from "./historySeries";
+
 export function ChartPanel({
   title,
   hint,
@@ -319,15 +315,17 @@ export function ChartPanel({
 }: {
   title: string;
   hint: string;
-  series: Array<{
-    key: string;
-    name: string;
-    color: string;
-    metric: DashboardOverview["metrics"][number] | null;
-  }>;
+  series: ChartSeries[];
   readouts?: Array<{ label: string; value: string }>;
 }) {
-  const withTrend = series.filter((entry) => entry.metric?.trend?.points.length);
+  // A single sample cannot form a line: require >=2 valid (non-gap) points.
+  const validCount = (entry: ChartSeries) =>
+    entry.points.filter((point) => point.value !== null).length;
+  const withPoints = series.filter((entry) => validCount(entry) >= 2);
+  const totalPoints = series.reduce(
+    (sum, entry) => sum + entry.points.length,
+    0,
+  );
   const gid = title.toLowerCase().replace(/[^a-z]+/g, "-");
   return (
     <section className="border border-line bg-panel">
@@ -343,38 +341,45 @@ export function ChartPanel({
               <span className="tnum text-text">{readout.value}</span>
             </span>
           ))}
-          {series.map((entry) => (
-            <span
-              key={entry.key}
-              className="flex items-center gap-1.5 text-[12px] text-dim"
-            >
-              <i
-                className="inline-block h-0.5 w-3"
-                style={{
-                  background: entry.color,
-                  opacity: entry.metric?.trend?.points.length ? 1 : 0.35,
-                }}
-              />
-              {entry.name}
-              {!entry.metric?.trend?.points.length && (
-                <span className="text-warn">no history</span>
-              )}
-            </span>
-          ))}
+          {series.map((entry) => {
+            const valid = entry.points.filter(
+              (point) => point.value !== null,
+            ).length;
+            return (
+              <span
+                key={entry.key}
+                className="flex items-center gap-1.5 text-[12px] text-dim"
+              >
+                <i
+                  className="inline-block h-0.5 w-3"
+                  style={{
+                    background: entry.color,
+                    opacity: valid >= 2 ? 1 : 0.35,
+                  }}
+                />
+                {entry.name}
+                {valid < 2 && (
+                  <span className="text-warn">no history</span>
+                )}
+              </span>
+            );
+          })}
         </div>
       </header>
       <div className="px-4 py-4">
-        {withTrend.length ? (
-          <TrendChart gid={gid} series={withTrend} />
+        {withPoints.length ? (
+          <TrendChart gid={gid} series={withPoints} />
         ) : (
           <div className="px-4 py-8 text-center">
-            <div className="text-[13px] font-medium">History unavailable</div>
+            <div className="text-[13px] font-medium">
+              {totalPoints === 0
+                ? "History unavailable"
+                : "Not enough history yet"}
+            </div>
             <p className="mx-auto mt-1 max-w-sm text-[12px] text-dim">
-              {readouts?.length
-                ? `Agents report current ${series
-                    .map((entry) => entry.name)
-                    .join(" / ")} values only; no trend history is collected yet.`
-                : "Trend history is not reported for these metrics yet."}
+              {totalPoints === 0
+                ? "No collected samples for this host yet."
+                : "At least two collected samples are needed to draw history; current values remain in the readouts."}
             </p>
           </div>
         )}
@@ -383,35 +388,57 @@ export function ChartPanel({
   );
 }
 
-function TrendChart({
-  gid,
-  series,
-}: {
-  gid: string;
-  series: Array<{
-    key: string;
-    name: string;
-    color: string;
-    metric: DashboardOverview["metrics"][number] | null;
-  }>;
-}) {
-  const plotted = series.filter((entry) => entry.metric?.trend?.points.length);
-  const range = plotted[0]?.metric?.trend?.range ?? "trend";
-  const maxPoint = Math.max(
-    ...plotted.flatMap((entry) => entry.metric?.trend?.points ?? [1]),
-    1,
+function TrendChart({ gid, series }: { gid: string; series: ChartSeries[] }) {
+  // ChartPanel already gates on >=2 valid points; double-check here.
+  const plotted = series.filter(
+    (entry) => entry.points.filter((point) => point.value !== null).length >= 2,
   );
+  const timestamps = plotted[0]?.points.map((point) => point.t) ?? [];
+  const validValues = plotted.flatMap((entry) =>
+    entry.points.flatMap((point) =>
+      point.value === null ? [] : [point.value],
+    ),
+  );
+  const maxPoint = Math.max(...validValues, 1);
+  const unit = plotted[0]?.unit;
   const width = 100;
   const height = 56;
   const top = 6;
   const bottom = 50;
-  const toPolyline = (values: number[]) =>
-    values
-      .map(
-        (point, index) =>
-          `${(index / Math.max(values.length - 1, 1)) * width},${bottom - (point / maxPoint) * (bottom - top)}`,
-      )
-      .join(" ");
+  const slotCount = Math.max(
+    ...plotted.map((entry) => entry.points.length),
+    1,
+  );
+  const pointAt = (entry: ChartSeries, index: number) => {
+    const point = entry.points[index];
+    if (!point || point.value === null) return null;
+    const x = (index / Math.max(slotCount - 1, 1)) * width;
+    const y = bottom - (point.value / maxPoint) * (bottom - top);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  };
+  // Split each series into runs of consecutive non-gap points so null gaps
+  // break the line instead of interpolating or zero-filling.
+  const segmentsOf = (entry: ChartSeries) => {
+    const runs: string[][] = [];
+    let run: string[] = [];
+    entry.points.forEach((point, index) => {
+      const coord = pointAt(entry, index);
+      if (coord === null) {
+        if (run.length >= 2) runs.push(run);
+        run = [];
+        return;
+      }
+      run.push(coord);
+    });
+    if (run.length >= 2) runs.push(run);
+    return runs.map((coords) => coords.join(" "));
+  };
+  const firstLabel = timestamps[0] ? formatChartTime(timestamps[0]) : "";
+  const lastStamp = timestamps.length
+    ? timestamps[timestamps.length - 1]
+    : undefined;
+  const lastLabel =
+    timestamps.length > 1 && lastStamp ? formatChartTime(lastStamp) : "now";
   const ticks = [0, 1, 2, 3].map((index) => {
     const value = (maxPoint / 3) * (3 - index);
     const y = top + ((bottom - top) / 3) * index;
@@ -465,42 +492,49 @@ function TrendChart({
               fontFamily="Geist Mono, monospace"
               style={{ fill: "hsl(var(--dim))" }}
             >
-              {tick.value.toFixed(0)}
+              {formatTickValue(tick.value, unit)}
             </text>
           </g>
         ))}
         {plotted.map((entry) => {
-          const trend = entry.metric?.trend;
-          if (!trend?.points.length) return null;
+          const lines = segmentsOf(entry);
+          if (!lines.length) return null;
           const thresholdY =
-            bottom -
-            (trend.threshold / Math.max(maxPoint, trend.threshold)) *
-              (bottom - top);
-          const line = toPolyline(trend.points);
+            entry.threshold === undefined
+              ? null
+              : bottom -
+                (entry.threshold / Math.max(maxPoint, entry.threshold)) *
+                  (bottom - top);
           return (
             <g key={entry.key}>
-              <polygon
-                points={`0,${bottom} ${line} ${width},${bottom}`}
-                fill={`url(#${gid}-${entry.key})`}
-              />
-              <polyline
-                points={line}
-                fill="none"
-                strokeWidth="0.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                vectorEffect="non-scaling-stroke"
-                style={{ stroke: entry.color }}
-              />
-              <line
-                x1="0"
-                x2={width}
-                y1={thresholdY}
-                y2={thresholdY}
-                strokeDasharray="2 1.5"
-                strokeWidth="0.4"
-                style={{ stroke: entry.color, opacity: 0.45 }}
-              />
+              {lines.map((line, index) => (
+                <g key={`${entry.key}-${index}`}>
+                  <polygon
+                    points={`0,${bottom} ${line} ${width},${bottom}`}
+                    fill={`url(#${gid}-${entry.key})`}
+                  />
+                  <polyline
+                    points={line}
+                    fill="none"
+                    strokeWidth="0.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
+                    style={{ stroke: entry.color }}
+                  />
+                </g>
+              ))}
+              {thresholdY !== null && Number.isFinite(thresholdY) ? (
+                <line
+                  x1="0"
+                  x2={width}
+                  y1={thresholdY}
+                  y2={thresholdY}
+                  strokeDasharray="2 1.5"
+                  strokeWidth="0.4"
+                  style={{ stroke: entry.color, opacity: 0.45 }}
+                />
+              ) : null}
             </g>
           );
         })}
@@ -514,8 +548,8 @@ function TrendChart({
         />
       </svg>
       <div className="tnum mt-1 flex justify-between text-[10px] uppercase tracking-[0.08em] text-dim">
-        <span>{range}</span>
-        <span>now</span>
+        <span>{firstLabel || "—"}</span>
+        <span>{lastLabel}</span>
       </div>
     </div>
   );
@@ -837,7 +871,7 @@ function MetricServerCard({
         <MetricMeter
           label="Net"
           value={null}
-          display={`${formatBytes(metric.networkRx)}/${formatBytes(metric.networkTx)}`}
+          display={formatNetworkPair(metric)}
           hot={focus === "network"}
         />
       </div>

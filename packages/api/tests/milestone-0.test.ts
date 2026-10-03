@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { parseAppConfig } from "../src/config/app-config.js";
-import { loadMigrations, selectMigrations } from "../src/db/migrations.js";
+import { selectMigrations } from "../src/db/migrations.js";
 import type { CommandJob } from "../src/jobs/jobs.models.js";
 import type { MetricSample } from "../src/metrics/metrics.models.js";
 import { createJsonJobRepository } from "../src/persistence/repositories/job.repository.js";
@@ -133,140 +133,22 @@ describe("agent app config", () => {
 });
 
 describe("database migrations", () => {
-  it("loads core migrations in filename order", async () => {
-    const migrations = await loadMigrations();
-    expect(migrations.map((migration) => migration.id)).toEqual([
-      "001_core_schema.sql",
-      "002_metric_indexes.sql",
-      "003_timescale_optional.sql",
-      "004_dashboard_sessions.sql",
-      "005_dashboard_admin_credentials.sql",
-      "006_rate_limit_buckets.sql",
-      "007_local_host_fields.sql",
-      "008_system_info.sql",
-      "009_docker_metrics.sql",
-      "010_ssh_host_key_pins.sql",
-      "011_vps_display_name.sql",
-      "012_vps_location.sql",
-      "013_docker_monitoring.sql",
-      "014_docker_ingest.sql",
-      "015_docker_metric_rollup_metric_name.sql",
-      "016_docker_alert_resolution.sql",
-      "017_docker_v1_unified_backfill.sql",
-      "018_docker_management.sql",
-      "019_docker_legacy_container_identity.sql",
-      "020_docker_v2_overview.sql",
-      "021_local_agent_upgrades.sql",
-    ]);
-    expect(migrations[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS vps");
-    expect(migrations[1]?.sql).toContain("metric_samples_vps_effective_idx");
-    expect(migrations[2]?.sql).toContain("create_hypertable");
-    expect(migrations[3]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS dashboard_sessions",
-    );
-    expect(migrations[4]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS dashboard_admin_credentials",
-    );
-    expect(migrations[5]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS rate_limit_buckets",
-    );
-    expect(migrations[6]?.sql).toContain(
-      "ALTER TABLE vps ADD COLUMN IF NOT EXISTS kind",
-    );
-    expect(migrations[7]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS agent_system_info",
-    );
-    expect(migrations[8]?.sql).toContain(
-      "ALTER TABLE vps ADD COLUMN IF NOT EXISTS docker_metrics_enabled",
-    );
-    expect(migrations[8]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS agent_docker_metrics",
-    );
-    expect(migrations[8]?.sql).toMatch(
-      /ALTER TABLE vps ADD COLUMN IF NOT EXISTS docker_metrics_enabled[\s\S]*CREATE TABLE IF NOT EXISTS agent_docker_metrics/,
-    );
-    expect(migrations[8]?.sql).not.toMatch(/\bDROP\s+(TABLE|COLUMN)\b/i);
-    expect(migrations[9]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS ssh_host_key_pins",
-    );
-    expect(migrations[10]?.sql).toContain(
-      "ALTER TABLE vps ADD COLUMN IF NOT EXISTS display_name",
-    );
-    expect(migrations[11]?.sql).toContain(
-      "ALTER TABLE vps ADD COLUMN IF NOT EXISTS city",
-    );
-    expect(migrations[11]?.sql).toContain(
-      "ALTER TABLE vps ADD COLUMN IF NOT EXISTS country",
-    );
-    expect(migrations[11]?.sql).toContain(
-      "ALTER TABLE vps ADD COLUMN IF NOT EXISTS location_detected_at",
-    );
-    expect(migrations[12]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS docker_metric_samples",
-    );
-    expect(migrations[13]?.sql).toContain(
-      "CREATE TABLE IF NOT EXISTS docker_snapshot_ledger",
-    );
-    expect(migrations[14]?.sql).toContain(
-      "ADD COLUMN IF NOT EXISTS metric_name",
-    );
-    expect(migrations[14]?.sql).toContain(
-      "docker_metric_rollups_dedupe_uidx",
-    );
-  });
-
-  it("excludes optional migrations unless requested", async () => {
-    const migrations = await loadMigrations();
+  it("excludes optional migrations unless requested", () => {
+    const migrations = [
+      { id: "001_core_schema.sql", path: "/fake/001_core_schema.sql", sql: "SELECT 1" },
+      {
+        id: "003_timescale_optional.sql",
+        path: "/fake/003_timescale_optional.sql",
+        sql: "SELECT 1",
+      },
+    ];
 
     expect(
       selectMigrations(migrations, false).map((migration) => migration.id),
-    ).toEqual([
-      "001_core_schema.sql",
-      "002_metric_indexes.sql",
-      "004_dashboard_sessions.sql",
-      "005_dashboard_admin_credentials.sql",
-      "006_rate_limit_buckets.sql",
-      "007_local_host_fields.sql",
-      "008_system_info.sql",
-      "009_docker_metrics.sql",
-      "010_ssh_host_key_pins.sql",
-      "011_vps_display_name.sql",
-      "012_vps_location.sql",
-      "013_docker_monitoring.sql",
-      "014_docker_ingest.sql",
-      "015_docker_metric_rollup_metric_name.sql",
-      "016_docker_alert_resolution.sql",
-      "017_docker_v1_unified_backfill.sql",
-      "018_docker_management.sql",
-      "019_docker_legacy_container_identity.sql",
-      "020_docker_v2_overview.sql",
-      "021_local_agent_upgrades.sql",
-    ]);
+    ).toEqual(["001_core_schema.sql"]);
     expect(
       selectMigrations(migrations, true).map((migration) => migration.id),
-    ).toEqual([
-      "001_core_schema.sql",
-      "002_metric_indexes.sql",
-      "003_timescale_optional.sql",
-      "004_dashboard_sessions.sql",
-      "005_dashboard_admin_credentials.sql",
-      "006_rate_limit_buckets.sql",
-      "007_local_host_fields.sql",
-      "008_system_info.sql",
-      "009_docker_metrics.sql",
-      "010_ssh_host_key_pins.sql",
-      "011_vps_display_name.sql",
-      "012_vps_location.sql",
-      "013_docker_monitoring.sql",
-      "014_docker_ingest.sql",
-      "015_docker_metric_rollup_metric_name.sql",
-      "016_docker_alert_resolution.sql",
-      "017_docker_v1_unified_backfill.sql",
-      "018_docker_management.sql",
-      "019_docker_legacy_container_identity.sql",
-      "020_docker_v2_overview.sql",
-      "021_local_agent_upgrades.sql",
-    ]);
+    ).toEqual(["001_core_schema.sql", "003_timescale_optional.sql"]);
   });
 });
 

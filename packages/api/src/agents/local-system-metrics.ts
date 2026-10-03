@@ -4,13 +4,28 @@ import type { MetricSample } from "../metrics/metrics.models.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
+// NetworkUnitBytesPerSecond is the explicit unit for SystemMetrics
+// NetworkRx/NetworkTx: both are computed throughput rates (bytes per
+// second), never cumulative counters. Always set on samples produced by
+// collectSystemMetrics.
+export const NETWORK_UNIT_BYTES_PER_SECOND = "bytes/s" as const;
+
 export type SystemMetrics = {
   cpu: number;
   memory: number;
   disk: number;
   loadAverage: number;
+  /** Throughput in bytes/s (delta between samples), never cumulative counters. */
   networkRx: number;
   networkTx: number;
+  /** Always "bytes/s": rx/tx are throughput rates. */
+  networkUnit: typeof NETWORK_UNIT_BYTES_PER_SECOND;
+  /**
+   * False on first sample / counter reset / non-advancing clock /
+   * unreadable counters: rx/tx are 0 and must be read as a gap, never as
+   * a zero-valued observation.
+   */
+  networkAvailable: boolean;
   uptime: number;
 };
 
@@ -19,6 +34,62 @@ export type SystemMetrics = {
 let previousCpuTimes: os.CpuInfo[] | null = null;
 let previousCpuIdle = 0;
 let previousCpuTotal = 0;
+
+// ── Network delta tracking ────────────────────────────────────────────────
+
+let previousNetRx: number | null = null;
+let previousNetTx: number | null = null;
+let previousNetAtMs = 0;
+
+/**
+ * Convert consecutive cumulative counter reads into a bytes-per-second rate.
+ * Exported for tests: the delta rules are contract-critical (the backend
+ * projects unavailable samples to null history gaps) and platform-independent.
+ *
+ * `curr` is the current cumulative read, or null when counters are
+ * unreadable. Returns rx=tx=0 with available=false on first sample, counter
+ * reset (either direction decreased), or non-advancing clock — callers must
+ * treat that as a gap, never as a zero-valued observation. A reset
+ * re-baselines so the following sample recovers; unreadable reads keep the
+ * baseline so the next successful read covers the full window.
+ */
+export function computeNetworkRate(
+  curr: { rx: number; tx: number } | null,
+  nowMs: number,
+): { rx: number; tx: number; available: boolean } {
+  if (curr === null) {
+    return { rx: 0, tx: 0, available: false };
+  }
+
+  if (previousNetRx === null || previousNetTx === null) {
+    previousNetRx = curr.rx;
+    previousNetTx = curr.tx;
+    previousNetAtMs = nowMs;
+    return { rx: 0, tx: 0, available: false };
+  }
+
+  const elapsedMs = nowMs - previousNetAtMs;
+  if (elapsedMs <= 0) {
+    return { rx: 0, tx: 0, available: false };
+  }
+
+  if (curr.rx < previousNetRx || curr.tx < previousNetTx) {
+    previousNetRx = curr.rx;
+    previousNetTx = curr.tx;
+    previousNetAtMs = nowMs;
+    return { rx: 0, tx: 0, available: false };
+  }
+
+  const rate = {
+    rx: ((curr.rx - previousNetRx) * 1000) / elapsedMs,
+    tx: ((curr.tx - previousNetTx) * 1000) / elapsedMs,
+    available: true,
+  };
+  previousNetRx = curr.rx;
+  previousNetTx = curr.tx;
+  previousNetAtMs = nowMs;
+  return rate;
+}
 
 function getCpuUsage(): number {
   const cpus = os.cpus();
@@ -132,25 +203,35 @@ function getLinuxUptime(): number {
   return parseFloat(content.split(" ")[0] ?? "0");
 }
 
-function getLinuxNetwork(): { rx: number; tx: number } {
+/**
+ * Read cumulative byte counters from /proc/net/dev (all non-`lo`
+ * interfaces summed). Returns null when unreadable — the caller converts
+ * that into an unavailable (gap) sample via computeNetworkRate.
+ */
+function readLinuxNetworkCounters(): { rx: number; tx: number } | null {
   const content = readProcFile("/proc/net/dev");
-  if (!content) return { rx: 0, tx: 0 };
+  if (!content) return null;
 
   let rx = 0;
   let tx = 0;
+  let sawInterface = false;
   const lines = content.split("\n");
   // Skip header lines (first 2)
   for (let i = 2; i < lines.length; i++) {
-    const line = lines[i].trim();
+    const line = (lines[i] ?? "").trim();
     if (!line) continue;
-    const iface = line.slice(0, line.indexOf(":")).trim();
+    const colon = line.indexOf(":");
+    if (colon < 0) continue;
+    const iface = line.slice(0, colon).trim();
     if (iface === "lo") continue;
-    const parts = line.split(/\s+/);
+    const parts = line.slice(colon + 1).trim().split(/\s+/);
     if (parts.length >= 10) {
-      rx += parseInt(parts[1] ?? "0", 10);
-      tx += parseInt(parts[9] ?? "0", 10);
+      rx += parseInt(parts[0] ?? "0", 10);
+      tx += parseInt(parts[8] ?? "0", 10);
+      sawInterface = true;
     }
   }
+  if (!sawInterface) return null;
   return { rx, tx };
 }
 
@@ -199,8 +280,12 @@ export function collectSystemMetrics(): SystemMetrics {
   // Load average
   const loadAverage = isLinux ? getLinuxLoadAverage() : (os.loadavg()[0] ?? 0);
 
-  // Network
-  const network = isLinux ? getLinuxNetwork() : { rx: 0, tx: 0 };
+  // Network throughput: delta consecutive cumulative reads into bytes/s.
+  // First sample / reset / unreadable yields rx=tx=0 + available=false
+  // (a chart gap, never a zero reading).
+  const network = isLinux
+    ? computeNetworkRate(readLinuxNetworkCounters(), Date.now())
+    : { rx: 0, tx: 0, available: false };
 
   // Uptime
   const uptime = isLinux ? getLinuxUptime() : os.uptime();
@@ -210,14 +295,18 @@ export function collectSystemMetrics(): SystemMetrics {
     memory: Math.min(100, Math.max(0, memory)),
     disk: Math.min(100, Math.max(0, disk)),
     loadAverage: Math.max(0, loadAverage),
-    networkRx: network.rx,
-    networkTx: network.tx,
+    networkRx: Math.max(0, network.rx),
+    networkTx: Math.max(0, network.tx),
+    networkUnit: NETWORK_UNIT_BYTES_PER_SECOND,
+    networkAvailable: network.available,
     uptime: Math.max(0, uptime),
   };
 }
 
 /**
  * Build a MetricSample from local system metrics.
+ * Always carries networkUnit/networkAvailable so ingest, persistence, and
+ * history projection see the throughput contract on every sample.
  */
 export function buildLocalMetricSample(
   vpsId: string,
@@ -232,6 +321,8 @@ export function buildLocalMetricSample(
     loadAverage: metrics.loadAverage,
     networkRx: metrics.networkRx,
     networkTx: metrics.networkTx,
+    networkUnit: metrics.networkUnit,
+    networkAvailable: metrics.networkAvailable,
     uptime: metrics.uptime,
     collectedAt: now,
     receivedAt: now,
@@ -241,10 +332,13 @@ export function buildLocalMetricSample(
 }
 
 /**
- * Reset CPU tracking state (useful for testing).
+ * Reset CPU and network delta-tracking state (useful for testing).
  */
-export function resetCpuTracking(): void {
+export function resetLocalMetricsTracking(): void {
   previousCpuTimes = null;
   previousCpuIdle = 0;
   previousCpuTotal = 0;
+  previousNetRx = null;
+  previousNetTx = null;
+  previousNetAtMs = 0;
 }

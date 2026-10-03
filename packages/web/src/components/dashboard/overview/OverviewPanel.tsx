@@ -6,6 +6,11 @@ import { JobsPanel } from "../jobs/JobsPanel";
 import { ResourceGauge } from "../shared/ResourceGauge";
 import { SystemFacts } from "../shared/SystemFacts";
 import { ChartPanel } from "../metrics/MetricsPanel";
+import {
+  cpuMemorySeries,
+  formatNetworkValue,
+  networkSeries,
+} from "../metrics/historySeries";
 
 export function DemoBanner({ overview }: { overview: DashboardOverview }) {
   if (!overview.banner) return null;
@@ -83,8 +88,10 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
   const cpuPct = metric?.cpu;
   const ramPct = metric?.memory;
   const diskPct = metric?.disk;
-  const cpuHistory = overview.metrics.find((sample) => sample.trend?.unit === "cpu") ?? null;
-  const memoryHistory = overview.metrics.find((sample) => sample.trend?.unit === "memory") ?? null;
+  // `overview.metrics` is already scoped to this VPS by the workspace
+  // context; the charts render this same host's own `history` window.
+  const cpuMemory = cpuMemorySeries(metric);
+  const netSeries = networkSeries(metric);
 
   const containersValue = docker?.available
     ? `${docker.containerRunning}/${docker.containerTotal}`
@@ -136,16 +143,10 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
         <ResourceGauge label="Disk /" value={diskPct} detail={sysInfo?.rootDisk?.totalBytes ? `${formatBytes(sysInfo.rootDisk.totalBytes)} total` : "Awaiting snapshot"} />
       </section>
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <ChartPanel title="CPU & Memory" hint="Agent-reported utilization history" series={[
-          { key: "cpu", name: "CPU", color: "hsl(var(--telemetry-cpu))", metric: cpuHistory },
-          { key: "memory", name: "RAM", color: "hsl(var(--telemetry-memory))", metric: memoryHistory },
-        ]} />
-        <ChartPanel title="Network I/O" hint="Cumulative bytes reported by the agent · not throughput" series={[
-          { key: "rx", name: "RX", color: "hsl(var(--telemetry-rx))", metric: null },
-          { key: "tx", name: "TX", color: "hsl(var(--telemetry-tx))", metric: null },
-        ]} readouts={[
-          { label: "RX", value: metric && Number.isFinite(metric.networkRx) ? formatBytes(metric.networkRx) : "n/a" },
-          { label: "TX", value: metric && Number.isFinite(metric.networkTx) ? formatBytes(metric.networkTx) : "n/a" },
+        <ChartPanel title="CPU & Memory" hint="Utilization history · percent" series={cpuMemory} />
+        <ChartPanel title="Network I/O" hint="Throughput (B/s) · unknown units render n/a" series={netSeries} readouts={[
+          { label: "RX", value: formatNetworkValue(metric, "networkRx") },
+          { label: "TX", value: formatNetworkValue(metric, "networkTx") },
         ]} />
       </div>
       <SystemFacts facts={sysCells} />

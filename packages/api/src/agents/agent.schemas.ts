@@ -415,6 +415,10 @@ export const agentMetricPayloadSchema = z
      }).strict().optional(),
      system: agentSystemInfoInputSchema.optional(),
     docker: agentDockerMetricsInputSchema.optional(),
+    /** New collectors always send B/s; old rows omit it. */
+    networkUnit: z.enum(["bytes/s"]).optional(),
+    /** false = first-sample/reset/elapsed<=0/unreadable (rx=tx=0 on the wire). */
+    networkAvailable: z.boolean().optional(),
   })
   .strict(); // reject unknown fields
 

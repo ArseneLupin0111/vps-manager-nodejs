@@ -25,6 +25,7 @@ import type { AgentRepository } from "../persistence/repositories/agent.reposito
 import type { JobRepository } from "../persistence/repositories/job.repository.js";
 import type { VpsRepository } from "../persistence/repositories/vps.repository.js";
 import type { MetricRepository } from "../persistence/repositories/metric.repository.js";
+import { withHistory } from "../metrics/metric-history.js";
 import type { DockerMonitoringRepository } from "../persistence/repositories/docker-monitoring.repository.js";
 import {
   AGENT_REPOSITORY,
@@ -146,7 +147,16 @@ export class DashboardService {
       ),
     );
     const rawMetrics = await this.metricRepository.listLatest();
-    const metrics: DashboardMetricSample[] = rawMetrics.map((m) => ({
+    const withWindows = await Promise.all(
+      rawMetrics.map(async (m) => {
+        const window = await this.metricRepository.listWindow(
+          m.vpsId,
+          this.config.metricWindowLimit,
+        );
+        return withHistory(m, window, this.config.metricWindowLimit);
+      }),
+    );
+    const metrics: DashboardMetricSample[] = withWindows.map((m) => ({
       ...m,
       freshness: isFreshTimestamp(m.receivedAt ?? m.collectedAt)
         ? "fresh"

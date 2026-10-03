@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — host metric charts
+
+- Project bounded per-VPS CPU, memory, RX, and TX history into metrics, dashboard, and live monitoring responses.
+- Standardize Go and local Linux network collectors on explicit bytes-per-second rates; mark first samples and counter resets unavailable rather than plotting false zero/spikes.
+- Persist network units and availability in JSON and PostgreSQL (migration `022_metric_network_fields.sql`).
+- Connect overview and metrics charts to timestamped same-host history, with separate RX/TX series, gap handling, and unit-aware readouts.
+
 ## Unreleased — reference dashboard design
 
 - Restyle FlexServer using the supplied VPS Management Dashboard reference: ink/lime palette, compact header, square panels, fleet cards/table, and workspace tabs.

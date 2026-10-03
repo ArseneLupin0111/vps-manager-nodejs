@@ -8,9 +8,10 @@ import { createJsonMetricRepository } from "../src/persistence/repositories/metr
 import { createJsonAgentRepository } from "../src/persistence/repositories/agent.repository.js";
 import { LocalAgentSupervisorService } from "../src/agents/local-agent-supervisor.service.js";
 import {
-  resetCpuTracking,
+  resetLocalMetricsTracking,
   collectSystemMetrics,
   buildLocalMetricSample,
+  computeNetworkRate,
 } from "../src/agents/local-system-metrics.js";
 import { isFreshTimestamp } from "../src/monitoring/monitoring.service.js";
 
@@ -72,7 +73,7 @@ describe("LocalAgentSupervisorService", () => {
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "vps-manager-local-agent-"));
-    resetCpuTracking();
+    resetLocalMetricsTracking();
   });
 
   afterEach(async () => {
@@ -285,7 +286,7 @@ describe("LocalAgentSupervisorService", () => {
 
 describe("collectSystemMetrics", () => {
   beforeEach(() => {
-    resetCpuTracking();
+    resetLocalMetricsTracking();
   });
 
   it("returns valid metrics structure", () => {
@@ -296,6 +297,8 @@ describe("collectSystemMetrics", () => {
     expect(metrics).toHaveProperty("loadAverage");
     expect(metrics).toHaveProperty("networkRx");
     expect(metrics).toHaveProperty("networkTx");
+    expect(metrics).toHaveProperty("networkUnit");
+    expect(metrics).toHaveProperty("networkAvailable");
     expect(metrics).toHaveProperty("uptime");
 
     expect(metrics.cpu).toBeGreaterThanOrEqual(0);
@@ -304,6 +307,17 @@ describe("collectSystemMetrics", () => {
     expect(metrics.memory).toBeLessThanOrEqual(100);
     expect(metrics.loadAverage).toBeGreaterThanOrEqual(0);
     expect(metrics.uptime).toBeGreaterThanOrEqual(0);
+
+    // Network throughput contract: explicit unit on every sample,
+    // non-negative rates, availability flag present.
+    expect(metrics.networkUnit).toBe("bytes/s");
+    expect(typeof metrics.networkAvailable).toBe("boolean");
+    expect(metrics.networkRx).toBeGreaterThanOrEqual(0);
+    expect(metrics.networkTx).toBeGreaterThanOrEqual(0);
+    // First sample after reset has no baseline: gap, not a zero reading.
+    expect(metrics.networkAvailable).toBe(false);
+    expect(metrics.networkRx).toBe(0);
+    expect(metrics.networkTx).toBe(0);
   });
 
   it("buildLocalMetricSample creates correct sample", () => {
@@ -317,5 +331,68 @@ describe("collectSystemMetrics", () => {
     expect(sample.agentVersion).toBe("0.1.0-local");
     expect(sample.collectedAt).toBeTruthy();
     expect(sample.receivedAt).toBeTruthy();
+
+    // Throughput contract flows through to the wire sample.
+    expect(sample.networkUnit).toBe("bytes/s");
+    expect(sample.networkAvailable).toBe(metrics.networkAvailable);
+    expect(sample.networkRx).toBe(metrics.networkRx);
+    expect(sample.networkTx).toBe(metrics.networkTx);
+  });
+});
+
+describe("computeNetworkRate", () => {
+  beforeEach(() => {
+    resetLocalMetricsTracking();
+  });
+
+  it("marks the first sample unavailable and baselines", () => {
+    const first = computeNetworkRate({ rx: 3000, tx: 1100 }, 1_000);
+    expect(first).toEqual({ rx: 0, tx: 0, available: false });
+
+    // 3000 rx / 1100 tx bytes over 1s => rates equal deltas.
+    const second = computeNetworkRate({ rx: 6000, tx: 2200 }, 2_000);
+    expect(second.available).toBe(true);
+    expect(second.rx).toBe(3000);
+    expect(second.tx).toBe(1100);
+  });
+
+  it("suppresses both directions on counter reset and recovers", () => {
+    computeNetworkRate({ rx: 10_000, tx: 5_000 }, 1_000);
+
+    // Either direction going backwards invalidates the whole interval —
+    // no partial rate may leak through the other direction.
+    const reset = computeNetworkRate({ rx: 2_000, tx: 6_000 }, 2_000);
+    expect(reset).toEqual({ rx: 0, tx: 0, available: false });
+
+    // Counters advance past the reset baseline: clean recovery.
+    const recovered = computeNetworkRate({ rx: 3_000, tx: 6_500 }, 3_000);
+    expect(recovered.available).toBe(true);
+    expect(recovered.rx).toBe(1000);
+    expect(recovered.tx).toBe(500);
+  });
+
+  it("marks non-advancing clocks unavailable and keeps the baseline", () => {
+    computeNetworkRate({ rx: 3_000, tx: 1_100 }, 1_000);
+
+    const stalled = computeNetworkRate({ rx: 6_000, tx: 2_200 }, 1_000);
+    expect(stalled).toEqual({ rx: 0, tx: 0, available: false });
+
+    // Next sample with a live clock covers the full window.
+    const after = computeNetworkRate({ rx: 6_000, tx: 2_200 }, 3_000);
+    expect(after.available).toBe(true);
+    expect(after.rx).toBe(1500);
+    expect(after.tx).toBe(550);
+  });
+
+  it("marks unreadable counters unavailable without losing the baseline", () => {
+    computeNetworkRate({ rx: 3_000, tx: 1_100 }, 1_000);
+
+    const unreadable = computeNetworkRate(null, 2_000);
+    expect(unreadable).toEqual({ rx: 0, tx: 0, available: false });
+
+    const after = computeNetworkRate({ rx: 6_000, tx: 2_200 }, 3_000);
+    expect(after.available).toBe(true);
+    expect(after.rx).toBe(1500);
+    expect(after.tx).toBe(550);
   });
 });

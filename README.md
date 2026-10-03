@@ -91,6 +91,15 @@ Open <http://localhost:3000> and sign in with the password you set. Add a VPS fr
 | Web terminal | Canned output only | Optional; disabled by default and requires extra origin/session configuration |
 | Host metrics | Simulated | In-process local agent or separately installed host agent |
 
+### Host metric history
+
+CPU & Memory charts use each VPS's retained CPU/RAM samples, with collection timestamps. Network I/O shows separate RX/TX throughput in **B/s**, not cumulative byte totals. The same per-host `history` is returned by `/api/metrics`, `/api/dashboard`, and the monitoring SSE stream; `METRIC_WINDOW_LIMIT` bounds the history (default 120 samples).
+
+The Go agent and in-process Linux collector emit `networkUnit: "bytes/s"` and `networkAvailable`. Initial samples, counter resets, or unavailable network readings become chart gaps instead of false zero/spikes. Legacy local-agent totals remain unavailable as throughput; legacy Go-agent rates are identified at read time. Unsupported local network collection displays `n/a`.
+
+For PostgreSQL, apply `022_metric_network_fields.sql` through `npm run migrate:db` before starting the updated API. Rebuild/deploy the API and web assets, and rebuild/redeploy the host agent to emit explicit unit/availability metadata. Charts populate as fresh samples arrive; fewer than two usable points show an insufficient-history state.
+
+
 ## Configuration and project layout
 
 | Component | Location | Purpose |

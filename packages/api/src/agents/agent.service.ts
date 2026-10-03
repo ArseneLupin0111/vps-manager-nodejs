@@ -392,6 +392,12 @@ export class AgentService {
         receivedAt: now,
         source: "agent",
         agentVersion: parsed.agentVersion,
+        ...(parsed.networkUnit !== undefined
+          ? { networkUnit: parsed.networkUnit }
+          : {}),
+        ...(parsed.networkAvailable !== undefined
+          ? { networkAvailable: parsed.networkAvailable }
+          : {}),
       };
 
       await this.metricRepository.append(sample, this.config.metricWindowLimit);

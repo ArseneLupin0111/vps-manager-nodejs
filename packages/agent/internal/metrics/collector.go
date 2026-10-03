@@ -18,18 +18,25 @@ var (
 	ErrUnsupported = fmt.Errorf("metrics collection not supported on this platform")
 )
 
+// NetworkUnitBytesPerSecond is the explicit unit for NetworkRx/NetworkTx:
+// both are computed throughput rates (bytes per second), never cumulative
+// counters. Always set on samples produced by Collect.
+const NetworkUnitBytesPerSecond = "bytes/s"
+
 // SystemMetrics represents a single snapshot of system metrics.
 type SystemMetrics struct {
-	CPU         float64        `json:"cpu"`
-	Memory      float64        `json:"memory"`
-	Disk        float64        `json:"disk"`
-	LoadAverage float64        `json:"loadAverage"`
-	NetworkRx   float64        `json:"networkRx"`
-	NetworkTx   float64        `json:"networkTx"`
-	Uptime      float64        `json:"uptime"`
-	System      *SystemInfo    `json:"system,omitempty"`
-	Docker      *DockerMetrics `json:"docker,omitempty"`
-	Location    *Location      `json:"location,omitempty"`
+	CPU              float64        `json:"cpu"`
+	Memory           float64        `json:"memory"`
+	Disk             float64        `json:"disk"`
+	LoadAverage      float64        `json:"loadAverage"`
+	NetworkRx        float64        `json:"networkRx"`
+	NetworkTx        float64        `json:"networkTx"`
+	NetworkUnit      string         `json:"networkUnit,omitempty"`
+	NetworkAvailable bool           `json:"networkAvailable"`
+	Uptime           float64        `json:"uptime"`
+	System           *SystemInfo    `json:"system,omitempty"`
+	Docker           *DockerMetrics `json:"docker,omitempty"`
+	Location         *Location      `json:"location,omitempty"`
 }
 
 // CPUStats holds raw CPU time values from /proc/stat.
@@ -52,9 +59,12 @@ type NetStats struct {
 
 // Collector gathers system metrics using /proc (Linux) or returns clear errors.
 type Collector struct {
-	prevCPU     *CPUStats
-	prevNetRx   float64
-	prevNetTx   float64
+	prevCPU *CPUStats
+	// Network baseline is stored as raw uint64 counters (not float64) to
+	// avoid precision loss past 2^53, plus the baseline timestamp.
+	// prevNetTime.IsZero() means "no baseline yet" (first sample).
+	prevNetRx   uint64
+	prevNetTx   uint64
 	prevNetTime time.Time
 
 	// Docker metrics collection (thread-safe, off by default).
@@ -113,12 +123,14 @@ func (c *Collector) Collect(ctx context.Context) (*SystemMetrics, error) {
 	}
 	metrics.Uptime = uptime
 
-	netRx, netTx, err := c.collectNetwork()
+	netRx, netTx, netAvailable, err := c.collectNetwork()
 	if err != nil {
 		return nil, fmt.Errorf("network: %w", err)
 	}
 	metrics.NetworkRx = netRx
 	metrics.NetworkTx = netTx
+	metrics.NetworkUnit = NetworkUnitBytesPerSecond
+	metrics.NetworkAvailable = netAvailable
 
 	disk, err := collectDisk()
 	if err != nil {
@@ -158,7 +170,7 @@ func ReadCPUStats(data string) (*CPUStats, error) {
 		if len(fields) < 8 {
 			return nil, fmt.Errorf("unexpected cpu line: %q", line)
 		}
-		vals := make([]uint64, 8)
+		var vals [8]uint64
 		for i := 1; i <= 8; i++ {
 			v, err := strconv.ParseUint(fields[i], 10, 64)
 			if err != nil {
@@ -184,8 +196,18 @@ func ReadCPUStats(data string) (*CPUStats, error) {
 func CPUPercent(prev, curr *CPUStats) float64 {
 	prevTotal := prev.User + prev.Nice + prev.System + prev.Idle + prev.IOWait + prev.IRQ + prev.SoftIRQ + prev.Steal
 	currTotal := curr.User + curr.Nice + curr.System + curr.Idle + curr.IOWait + curr.IRQ + curr.SoftIRQ + curr.Steal
+	// Counter reset (e.g., boot / /proc rollover): total went backwards.
+	// Report 0 until the next sample instead of wrapping unsigned math.
+	if currTotal < prevTotal {
+		return 0
+	}
 	totalDelta := currTotal - prevTotal
 	if totalDelta == 0 {
+		return 0
+	}
+	// Partial reset guard: idle moving backwards while total moved forward
+	// would wrap idleDelta and spike. Clamp instead of emitting garbage.
+	if curr.Idle < prev.Idle {
 		return 0
 	}
 	idleDelta := curr.Idle - prev.Idle
@@ -352,14 +374,19 @@ func ReadNetDev(data string) (map[string]NetStats, error) {
 	return stats, nil
 }
 
-func (c *Collector) collectNetwork() (rxRate, txRate float64, err error) {
+// collectNetwork computes bytes-per-second rates from consecutive
+// /proc/net/dev snapshots. available=false means no trustworthy rate exists
+// for this interval (first sample, counter reset, or non-advancing clock):
+// rx/tx are 0 and the caller must treat the point as a gap, never as a
+// zero-valued observation.
+func (c *Collector) collectNetwork() (rxRate, txRate float64, available bool, err error) {
 	data, err := readProcFile("/proc/net/dev")
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, false, err
 	}
 	curr, err := ReadNetDev(data)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, false, err
 	}
 
 	var currRx, currTx uint64
@@ -373,38 +400,41 @@ func (c *Collector) collectNetwork() (rxRate, txRate float64, err error) {
 
 	now := timeNow()
 
+	// First sample: store the baseline, no rate yet.
 	if c.prevNetTime.IsZero() {
-		c.prevNetRx = float64(currRx)
-		c.prevNetTx = float64(currTx)
+		c.prevNetRx = currRx
+		c.prevNetTx = currTx
 		c.prevNetTime = now
-		return 0, 0, nil
+		return 0, 0, false, nil
 	}
 
 	elapsed := now.Sub(c.prevNetTime).Seconds()
 	if elapsed <= 0 {
-		return 0, 0, nil
+		// Keep the baseline; the next sample with positive elapsed computes
+		// the delta over the longer window. No rate for this instant.
+		return 0, 0, false, nil
 	}
 
-	rxDelta := float64(currRx) - c.prevNetRx
-	txDelta := float64(currTx) - c.prevNetTx
-
-	// Handle counter reset (e.g., interface restart): return 0 until next sample
-	if rxDelta < 0 {
-		rxDelta = 0
+	// Counter reset (interface restart / hot-unplug): either direction going
+	// backwards makes the delta meaningless. Re-baseline on the current
+	// counters so the next sample recovers cleanly, and mark unavailable so
+	// the backend records a gap instead of a fake rate or 0-spike.
+	if currRx < c.prevNetRx || currTx < c.prevNetTx {
+		c.prevNetRx = currRx
+		c.prevNetTx = currTx
+		c.prevNetTime = now
+		return 0, 0, false, nil
 	}
-	if txDelta < 0 {
-		txDelta = 0
-	}
 
-	// Bytes per second
-	rxRate = rxDelta / elapsed
-	txRate = txDelta / elapsed
+	// Guarded by the check above: both subtractions are non-negative.
+	rxRate = float64(currRx-c.prevNetRx) / elapsed
+	txRate = float64(currTx-c.prevNetTx) / elapsed
 
-	c.prevNetRx = float64(currRx)
-	c.prevNetTx = float64(currTx)
+	c.prevNetRx = currRx
+	c.prevNetTx = currTx
 	c.prevNetTime = now
 
-	return rxRate, txRate, nil
+	return rxRate, txRate, true, nil
 }
 
 // ---------------------------------------------------------------------------

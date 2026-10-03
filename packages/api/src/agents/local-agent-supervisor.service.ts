@@ -19,7 +19,6 @@ import type { VpsRecord } from "../vps/vps.models.js";
 import {
   collectSystemMetrics,
   buildLocalMetricSample,
-  resetCpuTracking,
 } from "./local-system-metrics.js";
 
 /**

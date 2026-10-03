@@ -34,5 +34,5 @@ Keep keyboard focus visible and dialogs dismissible. Tables may scroll within th
 - `components/dashboard/shared/SystemFacts.tsx`: responsive labelled facts strip from `{ label, value }` pairs.
 - `components/dashboard/metrics/MetricsPanel.tsx` exports `ChartPanel`: shared telemetry history panel used by metrics and overview, with series legends, current readouts, and missing-history states.
 
-Overview histories must match the selected VPS and declared trend unit. RX/TX snapshots are cumulative byte counters, not Mb/s throughput; no fabricated network lines or relabelled CPU history.
+Overview histories must match the selected VPS: CPU and memory render two percent series from that host's own `history` window, and network I/O renders separate RX/TX bytes-per-second series on a shared axis. RX/TX rows carry an explicit `networkUnit: "bytes/s"` stamp with `networkAvailable: false` on first/reset samples (projected to gaps, never zero); absent unit means unknown and renders `n/a` — never a guessed unit. Null gaps break chart lines without interpolation or zero-fill, and empty windows render `History unavailable` vs `Not enough history yet`. No fabricated network lines, no percent network threshold, and no relabelled CPU history.
 
