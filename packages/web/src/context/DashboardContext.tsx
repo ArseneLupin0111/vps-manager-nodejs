@@ -378,6 +378,15 @@ export function DashboardProvider({
   useEffect(() => {
     const unsubscribe = subscribeMonitoring({
       onSnapshot: (payload) => {
+        if ("refreshRequired" in payload) {
+          void loadVps().catch(() => {
+            setStatus({
+              message: "Failed to refresh dashboard data.",
+              kind: "destructive",
+            });
+          });
+          return;
+        }
         setOverview((prev) => ({
           ...prev,
           ...payload.overview,

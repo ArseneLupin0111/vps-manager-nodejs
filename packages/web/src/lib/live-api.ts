@@ -21,7 +21,7 @@ export type MonitoringSnapshotPayload = {
   jobs: DashboardOverview["jobs"];
   metrics: DashboardOverview["metrics"];
   auditEvents: DashboardOverview["auditEvents"];
-};
+} | { refreshRequired: true };
 
 export type MetricsUpdatedPayload = {
   metrics: DashboardOverview["metrics"];

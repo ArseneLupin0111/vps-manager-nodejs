@@ -1151,6 +1151,119 @@ describe("React dashboard", () => {
       expect(sessionStorage.length).toBe(0);
     });
 
+    it("recovers from a refreshRequired snapshot by refetching over HTTP and keeps applying later metrics", async () => {
+      renderAppWithLiveEvents({
+        dashboard: demoDashboard,
+        servers: demoServerRecords,
+        jobs: [],
+        metrics: [
+          {
+            vpsId: "vps-1",
+            cpu: 11.1,
+            memory: 30,
+            disk: 40,
+            loadAverage: 0.5,
+            networkRx: 0,
+            networkTx: 0,
+            uptime: 600,
+            collectedAt: new Date().toISOString(),
+            freshness: "fresh" as const,
+          },
+        ],
+        auditEvents: [],
+      });
+
+      // Initial HTTP load renders the server card with its first metric.
+      expect(await screen.findByRole("heading", { name: "web-01" })).toBeInTheDocument();
+      expect(await screen.findByText("11.1%")).toBeInTheDocument();
+
+      // The bounded snapshot cannot carry the overview, so the next refetch
+      // must come from HTTP: dashboard, servers, jobs, metrics, audit.
+      const refreshedServer = { ...demoServerRecords[0], displayName: "web-01 refreshed" };
+      fetchMock.mockClear();
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: demoDashboard }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [refreshedServer] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [
+              {
+                vpsId: "vps-1",
+                cpu: 42.5,
+                memory: 55,
+                disk: 60,
+                loadAverage: 1.2,
+                networkRx: 0,
+                networkTx: 0,
+                uptime: 900,
+                collectedAt: new Date().toISOString(),
+                freshness: "fresh" as const,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [] }),
+        });
+
+      mockEventSourceInstance?.dispatchEvent(
+        "monitoring.snapshot",
+        makeEnvelope("monitoring.snapshot", { refreshRequired: true }),
+      );
+
+      // Refreshed HTTP data replaces the pre-refresh state on screen.
+      expect(
+        await screen.findByRole("heading", { name: "web-01 refreshed" }),
+      ).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith("/api/dashboard", expect.any(Object));
+      expect(await screen.findByText("42.5%")).toBeInTheDocument();
+      expect(screen.queryByText("11.1%")).not.toBeInTheDocument();
+
+      // The same live channel still merges metrics after the refetch.
+      mockEventSourceInstance?.dispatchEvent(
+        "metrics.updated",
+        makeEnvelope("metrics.updated", {
+          metrics: [
+            {
+              vpsId: "vps-1",
+              cpu: 87.5,
+              memory: 70,
+              disk: 65,
+              loadAverage: 2.4,
+              networkRx: 1024,
+              networkTx: 2048,
+              uptime: 950,
+              collectedAt: new Date().toISOString(),
+              freshness: "fresh" as const,
+            },
+          ],
+        }),
+      );
+
+      expect(await screen.findByText("87.5%")).toBeInTheDocument();
+      expect(screen.queryByText("42.5%")).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "web-01 refreshed" })).toBeInTheDocument();
+      expect(localStorage.length).toBe(0);
+      expect(sessionStorage.length).toBe(0);
+    });
+
   });
 
   describe("Phase 1-2 fixes", () => {

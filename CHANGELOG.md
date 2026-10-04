@@ -6,6 +6,7 @@
 - Standardize Go and local Linux network collectors on explicit bytes-per-second rates; mark first samples and counter resets unavailable rather than plotting false zero/spikes.
 - Persist network units and availability in JSON and PostgreSQL (migration `022_metric_network_fields.sql`).
 - Connect overview and metrics charts to timestamped same-host history, with separate RX/TX series, gap handling, and unit-aware readouts.
+- Handle bounded SSE snapshots containing `refreshRequired` by reloading dashboard data over HTTP instead of dereferencing an absent overview and crashing after login.
 
 ## Unreleased — reference dashboard design
 
