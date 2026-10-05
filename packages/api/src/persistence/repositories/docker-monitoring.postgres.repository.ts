@@ -1026,25 +1026,34 @@ export function createPostgresDockerMonitoringRepository(
                   [unit.vpsId, unit.agentInstanceId, unit.batchId],
                 )
               ).rows[0];
-        if (priorBatch) {
-          if (priorBatch.request_digest !== unit.requestDigest)
-            throw new DockerIngestConflict("request_digest_mismatch");
-          const parsed =
-            typeof priorBatch.result === "string"
-              ? JSON.parse(priorBatch.result)
-              : priorBatch.result;
-          return parsed as DockerIngestResult;
-        }
         const snapshot = (
-          await client.query<{ request_digest: string; result: unknown }>(
-            "SELECT request_digest,result FROM docker_snapshot_ledger WHERE vps_id=$1 AND snapshot_id=$2",
+          await client.query<{ request_digest: string; result: DockerIngestResult | string; agent_instance_id: string; source_sequence: string }>(
+            "SELECT request_digest,result,agent_instance_id,source_sequence FROM docker_snapshot_ledger WHERE vps_id=$1 AND snapshot_id=$2",
             [unit.vpsId, unit.snapshotId],
           )
         ).rows[0];
-        if (snapshot) {
-          if (snapshot.request_digest !== unit.requestDigest)
+        const matchesDigest = (digest: string, original: DockerIngestResult) => {
+          if (digest === unit.requestDigest) return true;
+          if (!snapshot || snapshot.request_digest !== digest || snapshot.agent_instance_id !== unit.agentInstanceId ||
+              snapshot.source_sequence !== unit.sourceSequence ||
+              original.vpsId !== unit.vpsId || original.agentInstanceId !== unit.agentInstanceId ||
+              original.snapshotId !== unit.snapshotId || original.batchId !== unit.batchId ||
+              unit.legacyRequestDigest?.(original.receivedAt) !== digest) return false;
+          return !unit.eventProtocol || (original.committedWatermark !== undefined &&
+            compareDockerWatermarks(original.committedWatermark, unit.eventProtocol.proposedWatermark) === 0);
+        };
+        if (priorBatch) {
+          const parsed: DockerIngestResult = typeof priorBatch.result === "string"
+            ? JSON.parse(priorBatch.result) : priorBatch.result;
+          if (priorBatch.snapshot_id !== unit.snapshotId || !matchesDigest(priorBatch.request_digest, parsed))
             throw new DockerIngestConflict("request_digest_mismatch");
-          return snapshot.result as DockerIngestResult;
+          return { ...parsed, ingestStatus: parsed.ingestStatus === "replay_ignored" ? "replay_ignored" : "already_committed" };
+        }
+        if (snapshot) {
+          const parsed = typeof snapshot.result === "string" ? JSON.parse(snapshot.result) as DockerIngestResult : snapshot.result;
+          if (!matchesDigest(snapshot.request_digest, parsed))
+            throw new DockerIngestConflict("request_digest_mismatch");
+          return { ...parsed, ingestStatus: parsed.ingestStatus === "replay_ignored" ? "replay_ignored" : "already_committed" };
         }
         const latest = (
           await client.query<{

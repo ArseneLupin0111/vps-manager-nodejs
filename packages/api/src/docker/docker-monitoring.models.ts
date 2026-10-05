@@ -148,6 +148,8 @@ export type DockerIngestUnit = {
   batchId?: string;
   requestDigest: string;
   requestDigestVersion: number;
+  /** Rebuild the v1 projection using the original ledger receive timestamp. */
+  legacyRequestDigest?: (receivedAt: string) => string;
   receivedAt: string;
   sourceSequence: DockerSourceSequence;
   hostSample: DockerHostSample;
@@ -165,6 +167,7 @@ export type DockerIngestBatchResult = {
   status: "committed" | "already_committed" | "replay_ignored";
   snapshotId: string;
   revision: number;
+  committedWatermark?: DockerEventWatermark;
 };
 export type DockerIngestBatch = {
   vpsId: string;

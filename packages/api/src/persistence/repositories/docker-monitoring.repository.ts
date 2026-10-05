@@ -29,6 +29,7 @@ import type {
   DockerContainerSample,
   DockerCurrentContainer,
   DockerIngestBatch,
+  DockerIngestBatchResult,
   DockerListScope,
   DockerMetricRollup,
   DockerOperationalEvent,
@@ -951,9 +952,25 @@ export function createJsonDockerMonitoringRepository(
         const snapshotKey = store.snapshots.find(
           (s) => s.vpsId === unit.vpsId && s.snapshotId === unit.snapshotId,
         );
-        if (snapshotKey && snapshotKey.requestDigest !== unit.requestDigest)
+        const matchesDigest = (digest: string, snapshotId: string, originalResult: DockerIngestBatchResult) => {
+          if (digest === unit.requestDigest) return true;
+          if (!snapshotKey || snapshotKey.snapshotId !== snapshotId ||
+              snapshotKey.agentInstanceId !== unit.agentInstanceId ||
+              snapshotKey.sourceSequence !== unit.sourceSequence ||
+              unit.legacyRequestDigest?.(snapshotKey.receivedAt) !== digest) return false;
+          if (!unit.eventProtocol) return true;
+          const committedWatermark = originalResult.committedWatermark ?? store.watermarks.find(
+            (w) => w.vpsId === unit.vpsId && w.agentInstanceId === unit.agentInstanceId &&
+              unit.batchId !== undefined && (w.committedBatchId === unit.batchId ||
+                (w.committedBatchId === undefined && w.updatedAt === snapshotKey.receivedAt)),
+          );
+          return committedWatermark !== undefined &&
+            compareDockerWatermarks(committedWatermark, unit.eventProtocol.proposedWatermark) === 0 &&
+            (!unit.batchId || (batchKey && batchKey.snapshotId === unit.snapshotId && batchKey.requestDigest === digest));
+        };
+        if (snapshotKey && !matchesDigest(snapshotKey.requestDigest, snapshotKey.snapshotId, snapshotKey.result))
           throw new DockerIngestConflict("snapshot_conflict");
-        if (snapshotKey && snapshotKey.requestDigest === unit.requestDigest) {
+        if (snapshotKey) {
           result = {
             vpsId: unit.vpsId,
             ingestStatus:
@@ -970,7 +987,8 @@ export function createJsonDockerMonitoringRepository(
           return store;
         }
         if (batchKey) {
-          if (batchKey.requestDigest !== unit.requestDigest)
+          const originalResult = typeof batchKey.result === "string" ? JSON.parse(batchKey.result) : batchKey.result;
+          if (!matchesDigest(batchKey.requestDigest, batchKey.snapshotId, originalResult))
             throw new DockerIngestConflict("request_digest_mismatch");
           result = {
             vpsId: unit.vpsId,
@@ -1341,6 +1359,7 @@ export function createJsonDockerMonitoringRepository(
           status: "committed" as const,
           snapshotId: unit.snapshotId,
           revision: store.revision,
+          ...(unit.eventProtocol ? { committedWatermark: unit.eventProtocol.proposedWatermark } : {}),
         };
         store.snapshots.push({
           vpsId: unit.vpsId,

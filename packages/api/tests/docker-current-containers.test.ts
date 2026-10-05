@@ -6,7 +6,13 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import type { AppConfig } from "../src/config/app-config.js";
+import { ConflictException } from "@nestjs/common";
 import { DockerMonitoringService } from "../src/docker/docker-monitoring.service.js";
+import {
+  DOCKER_INGEST_DIGEST_VERSION,
+  DOCKER_INGEST_LEGACY_DIGEST_VERSION,
+  dockerIngestRequestDigest,
+} from "../src/docker/docker-monitoring.schemas.js";
 import type { DockerIngestUnit } from "../src/docker/docker-monitoring.models.js";
 import type { AgentDockerMetricsInput } from "../src/agents/agent.models.js";
 import { createVpsStore } from "../src/persistence/store/vpsStore.js";
@@ -335,6 +341,29 @@ const GOLDEN_REQUEST_DIGEST =
   "113165755ce69e514a530990ab5eddc1b8684d7e365d7e366cde35650715228c";
 
 const RECEIVED_AT = "2026-09-15T12:00:01.000Z";
+const RECEIVED_AT2 = "2026-09-15T12:00:02.000Z";
+
+function eventfulFixture(
+  overrides: Partial<AgentDockerMetricsInput> = {},
+): AgentDockerMetricsInput {
+  return {
+    ...ingestFixture(),
+    batchId: "batch-golden",
+    events: [
+      {
+        eventId: "ev-1",
+        eventOccurredAt: "2026-09-15T12:00:00.000Z",
+        containerKey: "ck_alpha",
+        action: "start",
+        context: { version: 1 },
+      },
+    ],
+    eventWindow: { since: "0", until: "10", capped: false, lossy: false },
+    fromWatermark: { timeNano: "0", boundaryDigests: [] },
+    proposedWatermark: { timeNano: "10", boundaryDigests: [] },
+    ...overrides,
+  } as unknown as AgentDockerMetricsInput;
+}
 
 function capturingService() {
   const units: DockerIngestUnit[] = [];
@@ -383,11 +412,21 @@ describe("docker ingest container name persistence", () => {
       RECEIVED_AT,
     );
 
-    // Byte-identical to digests computed before name persistence existed.
-    expect(units[0]!.requestDigest).toBe(GOLDEN_REQUEST_DIGEST);
+    // v1 projection rebuilt with the original receive timestamp still matches
+    // the pre-name golden; v2 minimal projection strips name/image/status.
+    expect(units[0]!.requestDigestVersion).toBe(DOCKER_INGEST_DIGEST_VERSION);
+    expect(units[0]!.legacyRequestDigest?.(RECEIVED_AT)).toBe(
+      GOLDEN_REQUEST_DIGEST,
+    );
+    expect(
+      dockerIngestRequestDigest({}, DOCKER_INGEST_LEGACY_DIGEST_VERSION),
+    ).not.toBe(dockerIngestRequestDigest({}));
     // `name` is presentation metadata, never request identity.
     expect(units[1]!.requestDigest).toBe(units[0]!.requestDigest);
-    expect(units[1]!.requestDigest).toBe(GOLDEN_REQUEST_DIGEST);
+    expect(units[1]!.requestDigest).not.toBe(GOLDEN_REQUEST_DIGEST);
+    expect(units[1]!.legacyRequestDigest?.(RECEIVED_AT)).toBe(
+      GOLDEN_REQUEST_DIGEST,
+    );
   });
 
   it("round-trips persisted names through listCurrentContainers and dedupes replays", async () => {
@@ -439,5 +478,167 @@ describe("docker ingest container name persistence", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("accepts a repeated payload with a different receivedAt without extra samples", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vps-manager-current-replay-"));
+    try {
+      const repo = createJsonDockerMonitoringRepository(
+        join(dir, "docker-monitoring.json"),
+      );
+      const service = new DockerMonitoringService(
+        repo as never,
+        { get: vi.fn(async () => ({ id: "vps-golden" })) } as never,
+      );
+      const first = await service.ingest(
+        "vps-golden",
+        ingestFixture(),
+        RECEIVED_AT,
+      );
+      expect(first.ingestStatus).toBe("committed");
+      const replay = await service.ingest(
+        "vps-golden",
+        ingestFixture(),
+        RECEIVED_AT2,
+      );
+      expect(replay.ingestStatus).toBe("already_committed");
+      expect(replay.snapshotId).toBe(first.snapshotId);
+      expect(await service.currentContainers("vps-golden")).toHaveLength(2);
+      expect(
+        (await repo.listHostSamples({ vpsId: "vps-golden" })).data,
+      ).toHaveLength(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a changed CPU with snapshot_conflict", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vps-manager-current-cpu-"));
+    try {
+      const repo = createJsonDockerMonitoringRepository(
+        join(dir, "docker-monitoring.json"),
+      );
+      const service = new DockerMonitoringService(
+        repo as never,
+        { get: vi.fn(async () => ({ id: "vps-golden" })) } as never,
+      );
+      await service.ingest("vps-golden", ingestFixture(), RECEIVED_AT);
+      try {
+        await service.ingest(
+          "vps-golden",
+          { ...ingestFixture(), cpuPercent: 99.9 },
+          RECEIVED_AT2,
+        );
+        expect.unreachable("changed CPU must conflict");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConflictException);
+        const response = (
+          error as InstanceType<typeof ConflictException>
+        ).getResponse() as { error?: { code?: string } };
+        expect(response.error?.code).toBe("snapshot_conflict");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a v2 replay of a v1 commit via the original receive timestamp", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vps-manager-current-legacy-"));
+    try {
+      const repo = createJsonDockerMonitoringRepository(
+        join(dir, "docker-monitoring.json"),
+      );
+      const service = new DockerMonitoringService(
+        repo as never,
+        { get: vi.fn(async () => ({ id: "vps-golden" })) } as never,
+      );
+      const { service: capSvc, units: capUnits } = capturingService();
+      await capSvc.ingest("vps-golden", ingestFixture(), RECEIVED_AT);
+      const v1Digest = capUnits[0]!.legacyRequestDigest!(RECEIVED_AT);
+      expect(v1Digest).toBe(GOLDEN_REQUEST_DIGEST);
+      const v1Unit = {
+        ...capUnits[0]!,
+        vpsId: "vps-golden",
+        requestDigest: v1Digest,
+        requestDigestVersion: 1 as const,
+        receivedAt: RECEIVED_AT,
+      };
+      const committed = await repo.ingestUnit(v1Unit);
+      expect(committed.ingestStatus).toBe("committed");
+      const replay = await service.ingest(
+        "vps-golden",
+        ingestFixture(),
+        RECEIVED_AT2,
+      );
+      expect(replay.ingestStatus).toBe("already_committed");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a legacy replay with the wrong proposed watermark", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vps-manager-current-wm-"));
+    try {
+      const repo = createJsonDockerMonitoringRepository(
+        join(dir, "docker-monitoring.json"),
+      );
+      const service = new DockerMonitoringService(
+        repo as never,
+        { get: vi.fn(async () => ({ id: "vps-golden" })) } as never,
+      );
+      const { service: capSvc, units: capUnits } = capturingService();
+      await capSvc.ingest("vps-golden", eventfulFixture(), RECEIVED_AT);
+      const v1Digest = capUnits[0]!.legacyRequestDigest!(RECEIVED_AT);
+      const v1Unit = {
+        ...capUnits[0]!,
+        vpsId: "vps-golden",
+        requestDigest: v1Digest,
+        requestDigestVersion: 1 as const,
+        receivedAt: RECEIVED_AT,
+      };
+      await repo.ingestUnit(v1Unit);
+      const ok = await service.ingest(
+        "vps-golden",
+        eventfulFixture(),
+        RECEIVED_AT2,
+      );
+      expect(ok.ingestStatus).toBe("already_committed");
+      try {
+        await service.ingest(
+          "vps-golden",
+          eventfulFixture({
+            proposedWatermark: { timeNano: "11", boundaryDigests: [] },
+          }),
+          "2026-09-15T12:00:03.000Z",
+        );
+        expect.unreachable("wrong watermark must conflict");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConflictException);
+        const response = (
+          error as InstanceType<typeof ConflictException>
+        ).getResponse() as { error?: { code?: string } };
+        expect(response.error?.code).toBe("snapshot_conflict");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats eventProtocol and available as v2 digest identity", async () => {
+    const { service, units } = capturingService();
+    await service.ingest("vps-golden", ingestFixture(), RECEIVED_AT);
+    await service.ingest("vps-golden", eventfulFixture(), RECEIVED_AT);
+    expect(units[1]!.requestDigest).not.toBe(units[0]!.requestDigest);
+
+    const second = capturingService();
+    await second.service.ingest("vps-golden", ingestFixture(), RECEIVED_AT);
+    await second.service.ingest(
+      "vps-golden",
+      { ...ingestFixture(), available: false },
+      RECEIVED_AT,
+    );
+    expect(second.units[1]!.requestDigest).not.toBe(
+      second.units[0]!.requestDigest,
+    );
   });
 });

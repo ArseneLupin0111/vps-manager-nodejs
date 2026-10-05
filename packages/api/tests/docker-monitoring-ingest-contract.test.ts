@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DOCKER_INGEST_DIGEST_VERSION,
+  DOCKER_INGEST_LEGACY_DIGEST_VERSION,
   canonicalDockerJson,
   compareDockerSourceSequence,
   compareDockerWatermarks,
@@ -106,6 +108,21 @@ describe("Docker monitoring ingest I3 foundation contract", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("DockerIngestConflict");
     expect(error.code).toBe("watermark_conflict");
+  });
+
+  it("versions request digests with a stable v1 and a distinct v2 default", () => {
+    const value = { b: 1, a: [1, 2] };
+    expect(DOCKER_INGEST_DIGEST_VERSION).toBe(2);
+    expect(DOCKER_INGEST_LEGACY_DIGEST_VERSION).toBe(1);
+    expect(dockerIngestRequestDigest(value)).toBe(
+      dockerIngestRequestDigest(value, DOCKER_INGEST_DIGEST_VERSION),
+    );
+    expect(dockerIngestRequestDigest(value, 1)).toBe(
+      dockerIngestRequestDigest(value, 1),
+    );
+    expect(dockerIngestRequestDigest(value, 1)).not.toBe(
+      dockerIngestRequestDigest(value),
+    );
   });
 
   it("accepts required and full ingest unit fixtures at compile/runtime", () => {

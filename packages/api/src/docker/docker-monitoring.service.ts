@@ -17,6 +17,7 @@ import {
 } from "./docker-monitoring.models.js";
 import {
   DOCKER_INGEST_DIGEST_VERSION,
+  DOCKER_INGEST_LEGACY_DIGEST_VERSION,
   dockerIngestRequestDigest,
 } from "./docker-monitoring.schemas.js";
 import { ZodError } from "zod";
@@ -231,32 +232,47 @@ export class DockerMonitoringService {
       input.eventWindow !== undefined ||
       input.fromWatermark !== undefined ||
       input.proposedWatermark !== undefined;
+    // Keep the v1 projection and sample IDs intact for already committed ledgers.
+    const digestContainers = containerSamples.map(
+      ({ name: _name, image: _image, status: _status, ...sample }) => sample,
+    );
+    const digestProjection = {
+      vpsId,
+      agentInstanceId: input.agentInstanceId,
+      snapshotId: input.snapshotId,
+      batchId: input.batchId,
+      collectedAt: input.collectedAt,
+      sourceSequence,
+      hostMetrics,
+      containers: digestContainers,
+      events,
+      storage: input.storage,
+      ...(input.monitoring === undefined ? {} : { monitoring: input.monitoring }),
+    };
     const unit: DockerIngestUnit = {
       vpsId,
       agentInstanceId: input.agentInstanceId,
       snapshotId: input.snapshotId,
       batchId: input.batchId,
       requestDigest: dockerIngestRequestDigest({
-        vpsId,
-        agentInstanceId: input.agentInstanceId,
-        snapshotId: input.snapshotId,
-        batchId: input.batchId,
-        collectedAt: input.collectedAt,
-        sourceSequence,
-        hostMetrics,
-        // Request digest excludes persisted container identity fields
-        // (`name`/`image`/`status`): digest inputs stay byte-identical to the
-        // pre-identity mapping so replay dedupe is stable across this change
-        // (DOCKER_INGEST_DIGEST_VERSION remains 1).
-        containers: containerSamples.map(
-          ({ name: _name, image: _image, status: _status, ...sample }) => sample,
-        ),
-        events,
-        storage: input.storage,
-        ...(input.monitoring === undefined
-          ? {}
-          : { monitoring: input.monitoring }),
+        ...digestProjection,
+        containers: digestContainers.map(({ receivedAt: _receivedAt, ...sample }) => sample),
+        events: events?.map(({ receivedAt: _receivedAt, ...event }) => event),
+        ...(hasEventProtocol ? { eventProtocol: {
+          fromWatermark: from,
+          proposedWatermark: to,
+          eventWindow: { from: input.eventWindow?.since ?? from.timeNano, to: input.eventWindow?.until ?? to.timeNano },
+        } } : {}),
+        available: input.available,
+        ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
+        ...(input.engineVersion === undefined ? {} : { engineVersion: input.engineVersion }),
+        ...(input.apiVersion === undefined ? {} : { apiVersion: input.apiVersion }),
       }),
+      legacyRequestDigest: (originalReceivedAt) => dockerIngestRequestDigest({
+        ...digestProjection,
+        containers: digestContainers.map((sample) => ({ ...sample, receivedAt: originalReceivedAt })),
+        events: events?.map((event) => ({ ...event, receivedAt: originalReceivedAt })),
+      }, DOCKER_INGEST_LEGACY_DIGEST_VERSION),
       requestDigestVersion: DOCKER_INGEST_DIGEST_VERSION,
       receivedAt,
       sourceSequence,

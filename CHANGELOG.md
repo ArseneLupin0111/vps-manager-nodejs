@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Docker ingest replay recovery
+
+- Use receive-time-independent ingest digests so retained agent batches can retry after a lost acknowledgment.
+- Authenticate previously committed digest-v1 batches using their original ledger receipt time, identity, sequence, and committed watermark; changed bound payloads remain conflicts. No database migration or agent checkpoint reset is required.
+
 ## Unreleased — host metric charts
 
 - Project bounded per-VPS CPU, memory, RX, and TX history into metrics, dashboard, and live monitoring responses.

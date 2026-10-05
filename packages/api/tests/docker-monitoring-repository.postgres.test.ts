@@ -432,7 +432,10 @@ describe("docker monitoring repository (PostgreSQL, I1)", () => {
         boundaryDigests: ["digest-1"],
         committedBatchId: "batch-1",
       });
-      expect(await repo!.ingestUnit(base())).toEqual(committed);
+      expect(await repo!.ingestUnit(base())).toEqual({
+        ...committed,
+        ingestStatus: "already_committed",
+      });
       await expect(
         repo!.ingestUnit(base({ requestDigest: "digest-2" })),
       ).rejects.toMatchObject({ code: "request_digest_mismatch" });
@@ -476,6 +479,117 @@ describe("docker monitoring repository (PostgreSQL, I1)", () => {
       expect((await repo!.listHostSamples({ vpsId: "vps-a" })).data).toEqual(
         [],
       );
+    },
+  );
+
+  it.skipIf(!databaseUrl)(
+    "replay digests: repeat accepted, CPU change rejected, legacy accepted, wrong watermark rejected",
+    async () => {
+      const t1 = "2026-09-01T00:00:00.000Z";
+      const t2 = "2026-09-01T00:00:01.000Z";
+      const mkBase = (
+        vpsId: string,
+        snapshotId: string,
+        batchId: string,
+        digest: string,
+        receivedAt: string,
+        extra: Record<string, unknown> = {},
+      ) => ({
+        vpsId,
+        agentInstanceId: "inst1",
+        snapshotId,
+        batchId,
+        requestDigest: digest,
+        requestDigestVersion: 1,
+        receivedAt,
+        sourceSequence: "1",
+        hostSample: sample(`hs_${snapshotId}`, vpsId, receivedAt),
+        ...extra,
+      });
+      // Repeat with a different receivedAt stays a replay with ACK fields.
+      await ensureVps("vps-pg-replay");
+      const first = await repo!.ingestUnit(
+        mkBase("vps-pg-replay", "snap-r1", "batch-r1", "digest-r1", t1),
+      );
+      expect(first.ingestStatus).toBe("committed");
+      const replay = await repo!.ingestUnit(
+        mkBase("vps-pg-replay", "snap-r1", "batch-r1", "digest-r1", t2),
+      );
+      expect(replay.ingestStatus).toBe("already_committed");
+      expect(replay.snapshotId).toBe("snap-r1");
+      expect(replay.revision).toBe(first.revision);
+
+      // Changed payload (new digest, same snapshot) is rejected.
+      await expect(
+        repo!.ingestUnit(
+          mkBase("vps-pg-replay", "snap-r1", "batch-r1", "digest-r2", t2),
+        ),
+      ).rejects.toMatchObject({ code: "request_digest_mismatch" });
+
+      // v1 commit then v2 replay via the original receive timestamp.
+      await ensureVps("vps-pg-legacy");
+      const v1 = await repo!.ingestUnit(
+        mkBase("vps-pg-legacy", "snap-l1", "batch-l1", "digest-v1", t1),
+      );
+      expect(v1.ingestStatus).toBe("committed");
+      const v2Replay = await repo!.ingestUnit({
+        ...mkBase("vps-pg-legacy", "snap-l1", "batch-l1", "digest-v2", t2),
+        requestDigestVersion: 2,
+        legacyRequestDigest: (originalReceivedAt: string) =>
+          originalReceivedAt === t1 ? "digest-v1" : "digest-mismatch",
+      });
+      expect(v2Replay.ingestStatus).toBe("already_committed");
+
+      // Legacy replay with the wrong proposed watermark is rejected.
+      await ensureVps("vps-pg-wm");
+      const committedWm = await repo!.ingestUnit({
+        ...mkBase("vps-pg-wm", "snap-w1", "batch-w1", "digest-w1", t1),
+        events: [{ ...event("ev-w1", "vps-pg-wm", t1), sourceSequence: "1" }],
+        eventProtocol: {
+          fromWatermark: {
+            vpsId: "vps-pg-wm",
+            agentInstanceId: "inst1",
+            timeNano: "0",
+            boundaryDigests: [],
+            updatedAt: t1,
+          },
+          proposedWatermark: {
+            vpsId: "vps-pg-wm",
+            agentInstanceId: "inst1",
+            timeNano: "10",
+            boundaryDigests: ["digest-w1"],
+            updatedAt: t1,
+          },
+          eventWindow: { from: "0", to: "10" },
+        },
+      });
+      expect(committedWm.ingestStatus).toBe("committed");
+      await expect(
+        repo!.ingestUnit({
+          ...mkBase("vps-pg-wm", "snap-w1", "batch-w1", "digest-v2-wm", t2),
+          requestDigestVersion: 2,
+          legacyRequestDigest: (originalReceivedAt: string) =>
+            originalReceivedAt === t1 ? "digest-w1" : "digest-mismatch",
+          events: [{ ...event("ev-w1", "vps-pg-wm", t1), sourceSequence: "1" }],
+          eventProtocol: {
+            fromWatermark: {
+              vpsId: "vps-pg-wm",
+              agentInstanceId: "inst1",
+              timeNano: "0",
+              boundaryDigests: [],
+              updatedAt: t2,
+            },
+            proposedWatermark: {
+              vpsId: "vps-pg-wm",
+              agentInstanceId: "inst1",
+              timeNano: "11",
+              boundaryDigests: ["digest-wrong"],
+              updatedAt: t2,
+            },
+            eventWindow: { from: "0", to: "11" },
+          },
+        }),
+      ).rejects.toMatchObject({ code: "request_digest_mismatch" });
     },
   );
 

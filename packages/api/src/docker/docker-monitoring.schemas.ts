@@ -2,15 +2,16 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import type { DockerCursorPayload, DockerListScope, DockerEventWatermark, DockerInitialWatermark } from "./docker-monitoring.models.js";
 
-export const DOCKER_INGEST_DIGEST_VERSION = 1;
+export const DOCKER_INGEST_DIGEST_VERSION = 2;
+export const DOCKER_INGEST_LEGACY_DIGEST_VERSION = 1;
 export function canonicalDockerJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalDockerJson).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value as Record<string, unknown>).sort().map((k) => `${JSON.stringify(k)}:${canonicalDockerJson((value as Record<string, unknown>)[k])}`).join(",")}}`;
   return JSON.stringify(value);
 }
-export function dockerIngestRequestDigest(value: unknown): string { return createHash("sha256").update(`docker-ingest-v${DOCKER_INGEST_DIGEST_VERSION}:`).update(canonicalDockerJson(value)).digest("hex"); }
+export function dockerIngestRequestDigest(value: unknown, version = DOCKER_INGEST_DIGEST_VERSION): string { return createHash("sha256").update(`docker-ingest-v${version}:`).update(canonicalDockerJson(value)).digest("hex"); }
 export const DOCKER_INITIAL_WATERMARK: DockerInitialWatermark = { timeNano: "0", boundaryDigests: [] };
-export function compareDockerWatermarks(a: Pick<DockerEventWatermark, "timeNano" | "boundaryDigests">, b: Pick<DockerEventWatermark, "timeNano" | "boundaryDigests">): number { const n = BigInt(a.timeNano) - BigInt(b.timeNano); return n === 0n ? canonicalDockerJson(a.boundaryDigests).localeCompare(canonicalDockerJson(b.boundaryDigests)) : n < 0n ? -1 : 1; }
+export function compareDockerWatermarks(a: Pick<DockerEventWatermark, "timeNano" | "boundaryDigests">, b: Pick<DockerEventWatermark, "timeNano" | "boundaryDigests">): number { const n = BigInt(a.timeNano) - BigInt(b.timeNano); if (n !== 0n) return n < 0n ? -1 : 1; const aJ = canonicalDockerJson(a.boundaryDigests); const bJ = canonicalDockerJson(b.boundaryDigests); return aJ < bJ ? -1 : aJ > bJ ? 1 : 0; }
 export function compareDockerSourceSequence(a: string, b: string): number { const n = BigInt(a) - BigInt(b); return n === 0n ? 0 : n < 0n ? -1 : 1; }
 
 export const MAX_HISTORY_LIMIT = 500;
