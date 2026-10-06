@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — proxy address security patch
+
+- Override and lock `proxy-addr` to 2.0.8 for Express consumers, fixing CVE-2026-90711 / GHSA-jqcg-44mw-7w3h (client-IP spoofing through short IPv4-mapped IPv6 trust prefixes).
+- Keep the fixable-CRITICAL image security gate unchanged; the dependency patch replaces the vulnerable 2.0.7 package reported in the API image.
+
 ## Unreleased — Overview operational clarity
 
 - Separate host health, recent job outcomes and container counts; show recent failed-job notices with a Jobs link, while treating non-running containers neutrally with a Docker link.

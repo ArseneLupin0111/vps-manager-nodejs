@@ -29,7 +29,8 @@
     "migrate:db": "tsx packages/api/src/db/migrate.ts"
   },
   "overrides": {
-    "multer": "2.2.0"
+    "multer": "2.2.0",
+    "proxy-addr": "2.0.8"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.27",
