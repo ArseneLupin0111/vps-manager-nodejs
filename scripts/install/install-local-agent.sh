@@ -4,7 +4,7 @@
 # install-local-agent.sh — Install the VPS Manager agent on the local host.
 #
 # Usage:
-#   sudo ./install-local-agent.sh --binary <path> --config <path> [options]
+#   sudo ./scripts/install/install-local-agent.sh --binary <path> --config <path> [options]
 #
 # Options:
 #   --binary <path>       Path to the agent binary (required).
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     --enable-docker-metrics-access)
       ENABLE_DOCKER_ACCESS=true; shift ;;
     --help)
-      echo "Usage: sudo ./install-local-agent.sh --binary <path> --config <path> [options]"
+      echo "Usage: sudo ./scripts/install/install-local-agent.sh --binary <path> --config <path> [options]"
       echo ""
       echo "Options:"
       echo "  --binary <path>       Path to the agent binary (required)."
@@ -87,7 +87,7 @@ while [[ $# -gt 0 ]]; do
       exit 0 ;;
     *)
       echo "Error: Unknown argument: $1"
-      echo "Usage: sudo ./install-local-agent.sh --binary <path> --config <path> [options]"
+      echo "Usage: sudo ./scripts/install/install-local-agent.sh --binary <path> --config <path> [options]"
       exit 1 ;;
   esac
 done
@@ -416,7 +416,7 @@ if [[ -x /usr/local/lib/vps-manager-agent/vps-updater ]]; then
   echo "  Status: sudo /usr/local/lib/vps-manager-agent/vps-updater status -config /etc/vps-updater/config.json"
 else
   echo "Updater:  not installed — agent upgrades stay manual (plan §4/§5)."
-  echo "  Bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> \\"
+  echo "  Bootstrap: sudo ./scripts/install/install-updater.sh --binary <vps-updater> --config <config.json> \\"
   echo "             --manifest <manifest.json> --pubkey-file <pinned-release-pub.b64>"
   echo "             (--sha256 <entry-sha256> optional extra pin; must equal the signed entry, never trusted alone)"
 fi

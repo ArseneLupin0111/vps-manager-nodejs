@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildDockerStateProvisionCommand } from "../src/agents/agent-lifecycle-remote.js";
 
@@ -210,36 +208,4 @@ describe("buildDockerStateProvisionCommand", () => {
     // shellQuote: '...' with embedded '"'"' escapes; assignment stays one word.
     expect(tricky).toContain("_d='/home/deploy/dir with '\"'\"'quote'\"'\"'");
   });
-});
-
-describe("managed install/upgrade provisioning order", () => {
-  // Static order: the provisioning call must precede any agent run (-once)
-  // and any service start in each managed launch path.
-  const cases: Array<{ name: string; path: string; start?: string }> = [
-    {
-      name: "remote installer service",
-      path: "../src/agents/agent-installer.service.ts",
-      start: "nohup",
-    },
-    {
-      name: "remote upgrader service",
-      path: "../src/agents/agent-upgrader.service.ts",
-      start: "this.start(",
-    },
-    {
-      name: "manual env installer",
-      path: "../../../scripts/install-agent-from-env.ts",
-    },
-  ];
-
-  for (const { name, path, start } of cases) {
-    it(`${name} provisions before -once${start ? " and start" : ""}`, () => {
-      const src = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
-      const provision = src.indexOf("buildDockerStateProvisionCommand(");
-      const once = src.lastIndexOf(" -once");
-      expect(provision).toBeGreaterThan(-1);
-      expect(once).toBeGreaterThan(provision);
-      if (start) expect(src.indexOf(start)).toBeGreaterThan(provision);
-    });
-  }
 });

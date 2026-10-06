@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Overview operational clarity
+
+- Separate host health, recent job outcomes and container counts; show recent failed-job notices with a Jobs link, while treating non-running containers neutrally with a Docker link.
+- Make Overview audit events readable without truncated identifiers or redundant server columns; retain full metadata in the details drawer.
+- Increase secondary-text contrast and use explicit binary capacity units across host and Docker views; remove the duplicate Overview byte formatter.
+- Show failed-job completion percentage, failure reason and finish time instead of an active progress bar; omit missing worker/duration metadata and replace the developer-facing network hint.
+- Compact status cards, let recent jobs size to content, move static system facts below activity, and display the CPU model only once.
+
+## Unreleased — scripts directory layout
+
+- Group operational scripts into `agent/`, `vps/`, `admin/`, and `install/`; retain `ci/`, `release/`, and `tests/`.
+- Update npm commands, CI filters, installer download URLs, relative imports, shell checks, and operator instructions to the new paths. npm command names and production `dist/scripts/` paths are unchanged.
+
 ## Unreleased — Recharts telemetry charts
 
 - Replace custom SVG history charts for CPU/RAM, network RX/TX, and Docker CPU/memory with responsive Recharts components; resource meters remain unchanged.

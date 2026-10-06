@@ -89,21 +89,21 @@ jobs:
               - 'docker/**'
             agent:
               - 'packages/agent/**'
-              - 'scripts/build-agent.mjs'
+              - 'scripts/agent/**'
               - 'package.json'
               - 'package-lock.json'
             installer:
-              - 'scripts/install.sh'
-              - 'scripts/install-local-agent.sh'
+              - 'scripts/install/install.sh'
+              - 'scripts/install/install-local-agent.sh'
               - 'scripts/tests/test-installer-docker-access.sh'
               - 'scripts/tests/**'
               - 'Dockerfile'
               - 'docker-compose.yml'
               - '.github/workflows/ci.yml'
             updater:
-              - 'scripts/install.sh'
-              - 'scripts/install-local-agent.sh'
-              - 'scripts/install-updater.sh'
+              - 'scripts/install/install.sh'
+              - 'scripts/install/install-local-agent.sh'
+              - 'scripts/install/install-updater.sh'
               - 'scripts/tests/test-updater.sh'
               - 'packages/agent/**'
               - 'scripts/tests/**'
@@ -195,8 +195,8 @@ jobs:
       - name: Smoke test scripts (--help exits 0, no env required)
         if: needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true'
         run: |
-          npx tsx scripts/create-agent-token.ts --help
-          npx tsx scripts/install-agent-from-env.ts --help
+          npx tsx scripts/agent/create-agent-token.ts --help
+          npx tsx scripts/agent/install-agent-from-env.ts --help
 
       - name: Validate installer hardening
         if: needs.changes.outputs.full == 'true' || needs.changes.outputs.installer == 'true'
@@ -300,7 +300,7 @@ jobs:
         run: |
           AGENT_VERSION="${{ steps.agent-identity.outputs.version }}" \
           AGENT_BUILD_ID="${{ steps.agent-identity.outputs.build_id }}" \
-            node scripts/build-agent.mjs
+            node scripts/agent/build-agent.mjs
           IMAGE_ID="$(docker run --rm --entrypoint /app/agent/vps-agent-linux-amd64 vps-manager-nodejs-api:ci -version)"
           STANDALONE_ID="$(docker run --rm -v "$PWD/packages/agent/dist:/standalone:ro" --entrypoint /standalone/vps-agent-linux-amd64 vps-manager-nodejs-api:ci -version)"
           echo "image:      $IMAGE_ID"

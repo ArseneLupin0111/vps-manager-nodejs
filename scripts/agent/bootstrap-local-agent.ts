@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 /**
- * Thin entry point for local dev (runs via `npx tsx scripts/bootstrap-local-agent.ts`).
+ * Thin entry point for local dev (runs via `npx tsx scripts/agent/bootstrap-local-agent.ts`).
  *
  * In production, use the compiled version:
  *   node dist/scripts/bootstrap-local-agent.js --backend-url http://127.0.0.1:3000
@@ -11,6 +11,6 @@
  * which compiles to dist/scripts/bootstrap-local-agent.js during `npm run build`.
  */
 
-import { bootstrapLocalAgent } from "../packages/api/src/scripts/bootstrap-local-agent.js";
+import { bootstrapLocalAgent } from "../../packages/api/src/scripts/bootstrap-local-agent.js";
 
 bootstrapLocalAgent();

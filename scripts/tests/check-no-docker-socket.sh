@@ -5,7 +5,7 @@
 # Primary guard (image metadata alone is ineffective because the socket is
 # mounted at *run* time via Compose, not baked into image config):
 #   1. raw repository `docker-compose.yml` plus rendered `docker compose config`;
-#   2. scripts/install.sh generated Compose template (COMPOSE_CONTENT block)
+#   2. scripts/install/install.sh generated Compose template (COMPOSE_CONTENT block)
 #      plus a whole-file tripwire;
 #   3. production Compose heredoc embedded in .github/workflows/ci.yml
 #      (the `cat > '$DEPLOY_PATH/docker-compose.yml'` block written by deploy).
@@ -26,7 +26,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
-INSTALL_SH="${REPO_ROOT}/scripts/install.sh"
+INSTALL_SH="${REPO_ROOT}/scripts/install/install.sh"
 WORKFLOW="${REPO_ROOT}/.github/workflows/ci.yml"
 
 PASS=0

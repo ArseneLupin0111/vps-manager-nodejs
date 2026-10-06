@@ -5,7 +5,7 @@
 #
 # Verifies:
 #   1. Both installer scripts pass `bash -n` syntax checks.
-#   2. Static invariants in scripts/install-local-agent.sh:
+#   2. Static invariants in scripts/install/install-local-agent.sh:
 #        - the identity-loss guard refuses to rotate an existing identity;
 #        - an existing runtime-keys owner outside {root, service uid} fails closed;
 #        - provisioning runs with a computed owner uid, then ownership is
@@ -23,8 +23,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-INSTALL_SH="${REPO_ROOT}/scripts/install.sh"
-INSTALL_LOCAL="${REPO_ROOT}/scripts/install-local-agent.sh"
+INSTALL_SH="${REPO_ROOT}/scripts/install/install.sh"
+INSTALL_LOCAL="${REPO_ROOT}/scripts/install/install-local-agent.sh"
 
 PASS=0
 FAIL=0

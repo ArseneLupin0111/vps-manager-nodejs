@@ -16,16 +16,20 @@ The dashboard follows `VPS Management Dashboard/src`: a compact dark operational
 
 - Fleet sidebar: 272px desktop host navigation, active host indicator, health count, CPU/RAM snapshots, and create action. Below `lg`, hosts become a horizontally scrollable rail.
 - Fleet page: operational summaries, search/status filters, card/table switch, two-column cards collapsing to one on narrow screens. Search filters the page results, not the persistent host navigation.
-- Workspace: server identity and all seven horizontal section links; three segmented resource gauges, two telemetry panels, system facts, audit and jobs.
+- Workspace: server identity and seven horizontal section links; compact host/container/job summaries, failure notice, three resource gauges, two telemetry panels, recent audit and jobs, then static system facts.
 - Flat square surfaces, no decorative gradients or panel shadows.
 - Body text is compact; `.tnum` provides monospace tabular numerals for telemetry and identifiers.
 - Progress bars are thin. Status pills retain text labels, not color alone.
+- Secondary text uses the shared `dim` token at 68% lightness. Capacity labels use explicit binary units (KiB/MiB/GiB/TiB), consistent across host and Docker byte counts.
+- Overview audit rows prioritize time/actor and event/outcome; redundant server and opaque identifiers stay in the details drawer. Compact job panels size to content rather than stretching to match audit height.
 
 ## Data and interaction
 
 Retain existing API-backed actions, dialogs, authentication, capability restrictions, and terminal lifecycle. Missing telemetry must be labeled unavailable; charts must not relabel CPU history as memory or network history. Docker monitoring remains a separate workspace tab.
 
 Keep keyboard focus visible and dialogs dismissible. Tables may scroll within their containers on narrow screens. Pulse indicators respect reduced motion; existing overlay transitions remain in the shared primitives.
+- Host health is independent of job outcomes and container counts. Recent failed jobs produce a notice linking to Jobs; non-running containers have a neutral count and Docker link, not an inferred failure. Stale Docker counts retain an explicit snapshot label.
+- Failed jobs display the percentage reached, reported failure reason and finish time when available. Progress bars appear only while jobs are running; absent worker/duration metadata is omitted. Existing log links remain available.
 
 ## Reusable components
 

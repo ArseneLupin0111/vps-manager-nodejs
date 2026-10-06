@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu";
-import { chipVariant, freshnessLabel } from "../../../lib/dashboard-formatters";
+import { chipVariant, formatDate, freshnessLabel } from "../../../lib/dashboard-formatters";
 import type { DashboardOverview } from "../../../lib/api";
 import { EmptyState } from "../shared/EmptyState";
 import { SummaryPill } from "../shared/SummaryPill";
@@ -74,7 +74,7 @@ export function JobsPanel({
             <Badge
               variant={failed ? "destructive" : running ? "pending" : "outline"}
             >
-              {running} running
+              {failed ? `${failed} failed · ` : ""}{running} running
             </Badge>
           </div>
         </CardHeader>
@@ -210,6 +210,8 @@ export function JobsPanel({
 
 function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
   const progress = Math.min(100, Math.max(0, job.progress));
+  const isRunning = job.status === "running";
+  const meta = [job.workerId, job.status === "failed" ? `Failed at ${progress}%` : isRunning ? `${progress}% progress` : job.status === "queued" ? "Waiting for a worker" : job.status === "cancelled" ? `Cancelled at ${progress}%` : "Completed"].filter(Boolean).join(" · ");
   return (
     <article className="grid min-w-0 gap-2 px-4 py-3 transition-colors hover:bg-raised">
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -221,16 +223,19 @@ function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
             {job.type}
           </strong>
           <p
-            className="mt-1 truncate text-[13px] leading-6 text-dim"
-            title={`${job.vpsId} \u00b7 ${progress}% progress`}
+            className="mt-1 break-words text-[13px] leading-6 text-dim"
           >
-            {job.vpsId} · {job.workerId || "Worker n/a"} · {progress}% progress
+            {meta}
           </p>
         </div>
         <Badge className="shrink-0 uppercase" variant={chipVariant(job.status)}>
           {job.status}
         </Badge>
       </div>
+      {job.status === "failed" ? <p className="break-words text-[13px] text-text">{job.errorMessage || "Failure reason not reported."}</p> : null}
+      {job.finishedAt ? <time dateTime={job.finishedAt} className="text-[12px] text-dim">Finished {formatDate(job.finishedAt)}</time> : null}
+      {job.errorLogUrl ? <a href={job.errorLogUrl} target="_blank" rel="noopener noreferrer" className="w-fit text-[12px] text-text underline underline-offset-4">View log</a> : null}
+      {isRunning ? (
       <div
         className="h-1 overflow-hidden bg-line"
         role="progressbar"
@@ -240,10 +245,11 @@ function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
         aria-valuemax={100}
       >
         <div
-          className={`h-full ${job.status === "failed" ? "bg-crit" : "bg-signal"}`}
+          className="h-full bg-signal"
           style={{ width: `${progress}%` }}
         />
       </div>
+      ) : null}
     </article>
   );
 }
@@ -260,13 +266,15 @@ function JobCompactListRow({
   const durationText =
     job.durationMs != null
       ? `${(job.durationMs / 1000).toFixed(0)}s`
-      : "duration n/a";
+      : null;
   const meta = [
     job.vpsId,
-    job.workerId || "worker n/a",
+    job.workerId,
     durationText,
     `${job.retryCount ?? 0} retries`,
     job.startedAt ? `started ${freshnessLabel(job.startedAt)}` : null,
+    job.finishedAt ? `finished ${formatDate(job.finishedAt)}` : null,
+    isFailed ? `Failed at ${progress}%` : job.status === "cancelled" ? `Cancelled at ${progress}%` : null,
   ]
     .filter(Boolean)
     .join(" \u00b7 ");
@@ -293,12 +301,12 @@ function JobCompactListRow({
             Queued / {job.outputPreview || "Waiting for an available worker."}
           </p>
         ) : null}
-        {isFailed && job.errorMessage ? (
-          <p className="mt-1 line-clamp-2 text-[12px] text-text">
-            {job.errorMessage}
+        {isFailed ? (
+          <p className="mt-1 break-words text-[13px] text-text">
+            {job.errorMessage || "Failure reason not reported."}
           </p>
         ) : null}
-        {!isQueued ? (
+        {isRunning ? (
           <div
             className="mt-2 h-1 overflow-hidden bg-line"
             role="progressbar"
@@ -315,7 +323,7 @@ function JobCompactListRow({
         ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-2 md:justify-end">
-        {!isQueued ? (
+        {isRunning ? (
           <span className="tnum min-w-12 text-right text-[12px] text-dim">
             {progress}%
           </span>
@@ -361,22 +369,22 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
   const durationText =
     job.durationMs != null
       ? `${(job.durationMs / 1000).toFixed(0)}s`
-      : "Duration n/a";
+      : null;
   const retryText = `${job.retryCount ?? 0} retries`;
   const timeBits = [
     job.startedAt ? `Started ${freshnessLabel(job.startedAt)}` : null,
-    job.finishedAt ? `Finished ${freshnessLabel(job.finishedAt)}` : null,
+    job.finishedAt ? `Finished ${formatDate(job.finishedAt)}` : null,
   ].filter(Boolean);
   const isFailed = job.status === "failed";
   const isRunning = job.status === "running";
   const isQueued = job.status === "queued";
   const inlineMeta = [
     job.vpsId,
-    job.workerId || "Worker n/a",
+    job.workerId,
     durationText,
     retryText,
     ...timeBits,
-  ].join(" \u00b7 ");
+  ].filter(Boolean).join(" \u00b7 ");
   return (
     <article className="grid min-w-0 gap-3 px-4 py-4 transition-colors hover:bg-raised">
       <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
@@ -448,6 +456,8 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
         <p className="border border-line bg-ink px-3 py-2 text-[13px] leading-5 text-dim">
           Queued / {job.outputPreview || "Waiting for an available worker."}
         </p>
+      ) : !isRunning ? (
+        <p className="tnum text-[13px] text-dim">{isFailed ? `Failed at ${progress}%` : job.status === "cancelled" ? `Cancelled at ${progress}%` : "Completed"}</p>
       ) : (
         <div>
           <div className="flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.14em] text-dim">
@@ -469,9 +479,9 @@ function JobCard({ job }: { job: DashboardOverview["jobs"][number] }) {
           </div>
         </div>
       )}
-      {job.errorMessage ? (
+      {isFailed || job.errorMessage ? (
         <p className="border border-line bg-ink px-3 py-2 text-[13px] leading-5 text-text">
-          {job.errorMessage}
+          {job.errorMessage || "Failure reason not reported."}
         </p>
       ) : job.outputPreview && !isQueued ? (
         <p className="border border-line bg-ink px-3 py-2 text-[13px] leading-5 text-dim">

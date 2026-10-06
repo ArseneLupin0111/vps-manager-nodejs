@@ -300,7 +300,7 @@ function WorkspaceStatusBadge({ status }: { status?: VpsRecord["status"] }) {
           status === "healthy" ? "pulse" : ""
         }`}
       />
-      {label}
+      Host {label.toLowerCase()}
     </span>
   );
 }

@@ -10,7 +10,7 @@ Local host (`kind=local` hoặc `managedBy=system`) phải thấy phiên bản a
 
 - `packages/web/src/components/dashboard/servers/ServerCard.tsx` và `ServerTable.tsx` loại local khỏi `canUpgrade`; `DashboardContext.tsx` gọi `upgradeAgent()` hiện dành cho remote.
 - `packages/api/src/agents/agent-upgrader.service.ts` có staging/checksum, rollback và kiểm tra heartbeat qua SSH; không tái sử dụng SSH trên local. `VpsService` chặn lifecycle remote trên system-managed host. `AgentLifecycleCoordinator` chỉ giữ lock trong memory, không đủ làm khóa job bền vững qua restart/multi-instance.
-- `AgentState.version`, `lastSeenAt` được lưu từ ingest; system info/metric cũng có `agentVersion`. Không có catalog release. `Dockerfile` build Go không truyền `-ldflags` nên binary đóng trong API image trả `dev`; `scripts/build-agent.mjs` mới truyền phiên bản. CI chỉ push image theo SHA, không phát hành artifact/manifest agent độc lập. `scripts/install-local-agent.sh` cài binary systemd, không có updater.
+- `AgentState.version`, `lastSeenAt` được lưu từ ingest; system info/metric cũng có `agentVersion`. Không có catalog release. `Dockerfile` build Go không truyền `-ldflags` nên binary đóng trong API image trả `dev`; `scripts/agent/build-agent.mjs` mới truyền phiên bản. CI chỉ push image theo SHA, không phát hành artifact/manifest agent độc lập. `scripts/install/install-local-agent.sh` cài binary systemd, không có updater.
 - Một container API/web được deploy không chứng minh systemd agent đã đổi. Phải phân biệt version binary đang cài, version process thực sự gửi heartbeat, và desired release; chỉ heartbeat tươi mới xác nhận nâng cấp.
 
 ## Hợp đồng phát hành và tin cậy
@@ -34,7 +34,7 @@ Local host (`kind=local` hoặc `managedBy=system`) phải thấy phiên bản a
 2. Claim và ghi journal fsync gồm job ID, release/hash, pha, binary cũ/new, baseline heartbeat; khóa filesystem toàn cục và một job DB. Tải artifact vào file tạm giới hạn kích thước, verify manifest signature, checksum, `-version`/build ID, executable/arch; không thay binary nếu bất kỳ kiểm tra nào lỗi.
 3. Stage backup binary cũ, atomic rename binary mới, restart unit với timeout. Giữ state/config/credential Docker nguyên vẹn. Poll server heartbeat mới đúng build ID trước khi xóa backup. Nếu service thất bại hoặc timeout, restore backup nguyên tử, restart và xác minh heartbeat cũ; nếu chưa xác minh thì giữ backup/journal, báo tình trạng khẩn cấp, không tiếp tục job khác.
 4. Sau crash/reboot, updater đọc journal và xác minh file hash/service/heartbeat để tiếp tục đợi hoặc rollback; **không swap/restart lại một mutation không rõ kết quả**. Bảo vệ disk full, download cắt ngang, mất mạng, signature sai, report API thất bại, và restart API. Retain bounded logs không chứa payload/config/token; systemd hardening (`NoNewPrivileges` phần không cần root, `ProtectSystem`, `ReadWritePaths` tối thiểu, capability và network policy phù hợp).
-5. `scripts/install-local-agent.sh`/`scripts/install.sh`: bootstrap updater một lần, không thay cấu hình local agent đang chạy khi chỉ nâng cấp binary; hỗ trợ phát hiện updater cũ/thiếu, uninstall an toàn và runbook khôi phục ngoại tuyến. CI deploy API/web **không** tự âm thầm nâng cấp agent; manifest được publish là điều kiện tạo notification.
+5. `scripts/install/install-local-agent.sh`/`scripts/install/install.sh`: bootstrap updater một lần, không thay cấu hình local agent đang chạy khi chỉ nâng cấp binary; hỗ trợ phát hiện updater cũ/thiếu, uninstall an toàn và runbook khôi phục ngoại tuyến. CI deploy API/web **không** tự âm thầm nâng cấp agent; manifest được publish là điều kiện tạo notification.
 
 ## UX dashboard
 
@@ -44,7 +44,7 @@ Local host (`kind=local` hoặc `managedBy=system`) phải thấy phiên bản a
 
 ## Thứ tự thực hiện và điều kiện nghiệm thu
 
-1. **Release identity/catalog:** chỉnh `Dockerfile`, `scripts/build-agent.mjs`, `internal/version`, CI publish; manifest chữ ký/hash, API read-only release endpoint. Chứng minh binary image và standalone cùng build ID; manifest bị sửa/signature sai bị từ chối; version `dev` không được quảng bá là current.
+1. **Release identity/catalog:** chỉnh `Dockerfile`, `scripts/agent/build-agent.mjs`, `internal/version`, CI publish; manifest chữ ký/hash, API read-only release endpoint. Chứng minh binary image và standalone cùng build ID; manifest bị sửa/signature sai bị từ chối; version `dev` không được quảng bá là current.
 2. **Quan sát + manual fallback:** expose heartbeat version/build/freshness và release comparison; web card/table/workspace hiển thị nhất quán, link hướng dẫn thủ công. Smoke với heartbeat mới/cũ, release không có, local vs remote; không yêu cầu updater để xem trạng thái.
 3. **Updater + bootstrap:** cài host helper/service qua script, credential riêng, khóa/journal, verify/swap/rollback; integration test trong Linux VM/container có systemd hoặc harness unit giả với filesystem thật, bao gồm crash sau swap, signature sai, disk full và offline. Không thử nâng cấp production trước khi qua fault injection.
 4. **API job bền vững:** migration JSON/PostgreSQL theo repository convention, claim lease/fencing, authorization, audit, idempotency, timeout/reconcile; test race hai yêu cầu và multi-instance/restart, replay result, expired lease, CSRF/privilege denial. Không tái dùng in-memory coordinator làm nguồn chân lý.

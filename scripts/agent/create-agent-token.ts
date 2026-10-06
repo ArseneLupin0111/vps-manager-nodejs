@@ -1,12 +1,12 @@
 #!/usr/bin/env tsx
 
 import { createHash, randomBytes } from "node:crypto";
-import { loadAppConfig } from "../packages/api/src/config/app-config.js";
-import { createRepositories } from "../packages/api/src/persistence/repositories/create-repositories.js";
+import { loadAppConfig } from "../../packages/api/src/config/app-config.js";
+import { createRepositories } from "../../packages/api/src/persistence/repositories/create-repositories.js";
 
 function usage(exitCode = 0): never {
   const output = exitCode === 0 ? console.log : console.error;
-  output(`Usage: npx tsx scripts/create-agent-token.ts --vps-id <vps_id>
+  output(`Usage: npx tsx scripts/agent/create-agent-token.ts --vps-id <vps_id>
 
 Creates a one-time-display agent token for an existing VPS record.
 The raw token is printed once; only its hash is stored server-side.

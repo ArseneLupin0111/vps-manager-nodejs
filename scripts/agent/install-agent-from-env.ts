@@ -6,7 +6,7 @@
  * plus config, runs -once validation, and starts the background loop.
  *
  * Usage:
- *   npx tsx scripts/install-agent-from-env.ts --vps-id <vps_id> [--help]
+ *   npx tsx scripts/agent/install-agent-from-env.ts --vps-id <vps_id> [--help]
  *
  * Requires a .env.vps file with LOCAL_VPS_IP, LOCAL_VPS_PORT, LOCAL_VPS_USER,
  * LOCAL_VPS_PASSWORD.
@@ -16,9 +16,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { Client, type SFTPWrapper } from "ssh2";
-import { loadAppConfig } from "../packages/api/src/config/app-config.js";
-import { createRepositories } from "../packages/api/src/persistence/repositories/create-repositories.js";
-import { buildDockerStateProvisionCommand } from "../packages/api/src/agents/agent-lifecycle-remote.js";
+import { loadAppConfig } from "../../packages/api/src/config/app-config.js";
+import { createRepositories } from "../../packages/api/src/persistence/repositories/create-repositories.js";
+import { buildDockerStateProvisionCommand } from "../../packages/api/src/agents/agent-lifecycle-remote.js";
 
 const REMOTE_DIR = "/tmp/vps-manager-agent";
 const REMOTE_BINARY = `${REMOTE_DIR}/vps-agent`;
@@ -27,7 +27,7 @@ const LOCAL_BINARY = "packages/agent/dist/vps-agent-linux-amd64";
 
 function usage(exitCode = 0): never {
   const output = exitCode === 0 ? console.log : console.error;
-  output(`Usage: npx tsx scripts/install-agent-from-env.ts --vps-id <vps_id> [options]
+  output(`Usage: npx tsx scripts/agent/install-agent-from-env.ts --vps-id <vps_id> [options]
 
 Installs the agent on a VPS using SSH credentials from .env.vps.
 

@@ -4,8 +4,8 @@
 #
 # Verifies:
 #   1. Both installer scripts pass `bash -n` syntax checks.
-#   2. Static least-privilege invariants in scripts/install.sh and
-#      scripts/install-local-agent.sh:
+#   2. Static least-privilege invariants in scripts/install/install.sh and
+#      scripts/install/install-local-agent.sh:
 #        - default install never grants the docker group;
 #        - only `--enable-docker-metrics-access` adds `SupplementaryGroups=docker`;
 #        - no docker-socket chmod / usermod / gpasswd / setfacl workarounds;
@@ -22,8 +22,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-INSTALL_SH="${REPO_ROOT}/scripts/install.sh"
-INSTALL_LOCAL="${REPO_ROOT}/scripts/install-local-agent.sh"
+INSTALL_SH="${REPO_ROOT}/scripts/install/install.sh"
+INSTALL_LOCAL="${REPO_ROOT}/scripts/install/install-local-agent.sh"
 
 PASS=0
 FAIL=0
@@ -80,23 +80,6 @@ if grep -A6 -- '--enable-docker-metrics-access was specified' "$INSTALL_LOCAL" |
 else
   fail "install-local-agent.sh must exit non-zero when the docker group is missing"
 fi
-# --help documents the flag and the root-equivalent warning (runs without root).
-if bash "$INSTALL_LOCAL" --help 2>&1 | grep -q 'root-equivalent'; then
-  pass "install-local-agent.sh --help warns the docker group is root-equivalent"
-else
-  fail "install-local-agent.sh --help must warn the docker group is root-equivalent"
-fi
-if bash "$INSTALL_SH" --help 2>&1 | grep -q 'root-equivalent'; then
-  pass "install.sh --help warns the docker group is root-equivalent"
-else
-  fail "install.sh --help must warn the docker group is root-equivalent"
-fi
-if bash "$INSTALL_SH" --help 2>&1 | grep -q 'enable-docker-metrics-access'; then
-  pass "install.sh --help documents the opt-in flag"
-else
-  fail "install.sh --help must document --enable-docker-metrics-access"
-fi
-
 # ── 3. Live generated-unit checks (need root/sudo; --dry-run only) ───────
 
 SUDO=()

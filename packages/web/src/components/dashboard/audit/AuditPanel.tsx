@@ -238,7 +238,12 @@ export function AuditPanel({
         ) : null}
         {displayedEvents.length ? (
           <div className="min-w-0">
-            <div className="hidden grid-cols-[1fr_1.55fr_0.8fr_1fr_0.8fr_0.8fr_1fr_0.8fr] gap-3 bg-raised px-4 py-2.5 text-[11px] uppercase tracking-[0.14em] text-dim lg:grid">
+            {compact ? (
+              <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-4 bg-raised px-4 py-2.5 text-[12px] uppercase tracking-wider text-dim md:grid">
+                <span>Time / actor</span><span>Event / outcome</span><span>Action</span>
+              </div>
+            ) : null}
+            <div className={`${compact ? "hidden" : "hidden lg:grid"} grid-cols-[1fr_1.55fr_0.8fr_1fr_0.8fr_0.8fr_1fr_0.8fr] gap-3 bg-raised px-4 py-2.5 text-[11px] uppercase tracking-[0.14em] text-dim`}>
               <span>Time</span>
               <span>Event</span>
               <span>Actor</span>
@@ -266,7 +271,23 @@ export function AuditPanel({
                   event.requestId ||
                   event.authMethod ||
                   event.client;
-                return (
+                return compact ? (
+                  <article key={event.id} className="grid min-w-0 gap-3 px-4 py-3 text-[13px] leading-5 hover:bg-raised md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] md:items-start">
+                    <div className="min-w-0">
+                      <time dateTime={event.timestamp} className="tnum block text-dim">{formatDate(event.timestamp)}</time>
+                      <span className="mt-1 block break-words text-text">{event.actor || "system"}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="break-words font-medium text-text">{event.actionLabel || event.action}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        <Badge variant={severity === "critical" ? "destructive" : severity === "warning" ? "warning" : "secondary"}>{severity}</Badge>
+                        <Badge variant={event.result === "success" ? "ready" : "destructive"}>{event.result}</Badge>
+                      </div>
+                      {event.reason ? <p className="mt-1.5 break-words text-dim">Reason: {event.reason}</p> : null}
+                    </div>
+                    <Button size="sm" variant="outline" className="h-8 w-fit px-2 text-xs" aria-label={`Details for ${event.actionLabel || event.action}`} onClick={() => setSelectedEvent(event)}>Details</Button>
+                  </article>
+                ) : (
                   <article
                     key={event.id}
                     className="grid min-w-0 gap-2 px-4 py-3 text-[13px] leading-6 text-dim transition-colors hover:bg-raised lg:grid-cols-[1fr_1.55fr_0.8fr_1fr_0.8fr_0.8fr_1fr_0.8fr] lg:items-center"

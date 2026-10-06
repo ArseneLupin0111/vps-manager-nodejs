@@ -6,8 +6,8 @@
 # on a Linux amd64 server.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install.sh | sudo bash
-#   sudo ./scripts/install.sh [options]
+#   curl -fsSL https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/install.sh | sudo bash
+#   sudo ./scripts/install/install.sh [options]
 #
 # Options:
 #   --help                   Show this help.
@@ -509,7 +509,7 @@ else
         else
           INSTALL_SCRIPT="$(mktemp)"
           TMP_FILES+=("$INSTALL_SCRIPT")
-          curl -fsSL -o "$INSTALL_SCRIPT" "https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install-local-agent.sh"
+          curl -fsSL -o "$INSTALL_SCRIPT" "https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/install-local-agent.sh"
           chmod 0755 "$INSTALL_SCRIPT"
         fi
       fi
@@ -547,7 +547,7 @@ else
     else
       echo "Warning: install-local-agent.sh not found. Skipping agent installation." >&2
       echo "  To install manually:" >&2
-      echo "    curl -fsSL https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install-local-agent.sh | sudo bash -s -- --binary <binary> --config <config>" >&2
+      echo "    curl -fsSL https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/install-local-agent.sh | sudo bash -s -- --binary <binary> --config <config>" >&2
     fi
   else
     echo "Warning: Agent binary or config could not be obtained. Skipping agent installation." >&2
@@ -586,7 +586,7 @@ echo ""
 # Runbook pointer (plan §5): the app never silently upgrades the local
 # agent or the updater; both stay operator-driven.
 echo "Local agent/updater upgrades are NEVER automatic (plan §5)."
-echo "  Manual updater bootstrap: sudo ./scripts/install-updater.sh --binary <vps-updater> --config <config.json> \\"
+echo "  Manual updater bootstrap: sudo ./scripts/install/install-updater.sh --binary <vps-updater> --config <config.json> \\"
 echo "                            --manifest <manifest.json> --pubkey-file <pinned-release-pub.b64>"
 echo "                            (--sha256 <entry-sha256> optional extra pin; must equal the signed entry, never trusted alone)"
 echo "  Offline runbook:          docs/local-agent-upgrade-operations.md"

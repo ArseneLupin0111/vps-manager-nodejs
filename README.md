@@ -51,12 +51,12 @@ Open <http://localhost:3000>. Compose starts PostgreSQL, runs migrations before 
 
 ## Install on a Linux amd64 VPS
 
-Use [scripts/install.sh](scripts/install.sh) to deploy the application and host agent. **Review the script and its options before running it with sudo**:
+Use [scripts/install/install.sh](scripts/install/install.sh) to deploy the application and host agent. **Review the script and its options before running it with sudo**:
 
 ```bash
-sudo ./scripts/install.sh --help
-sudo ./scripts/install.sh --dry-run
-sudo ./scripts/install.sh
+sudo ./scripts/install/install.sh --help
+sudo ./scripts/install/install.sh --dry-run
+sudo ./scripts/install/install.sh
 ```
 
 The installer creates configuration under `/opt/vps-manager`, starts the containers, sets the dashboard password, and installs a systemd agent to collect host metrics. The dashboard is available at `http://<server-ip>:38280` by default. Use `--skip-agent` to install only the application, or `--install-docker` to let the installer install Docker. Run `--help` for other options.
@@ -109,6 +109,8 @@ For PostgreSQL, apply `022_metric_network_fields.sql` through `npm run migrate:d
 | Agent | `packages/agent/` | Host metrics collection and authorized Docker operations |
 | Local data | `data/`, `private/` | JSON data and SSH keys; not served over HTTP |
 | Deployment | `docker-compose.yml`, `scripts/` | Compose, migrations, and host agent installation |
+
+Scripts are grouped by purpose under `scripts/`: `agent/` (build and provisioning CLIs), `vps/` (environment imports), `admin/` (dashboard password CLI), `install/` (Linux installers), `ci/` (security gates), `release/` (manifest tools and fixtures), and `tests/` (shell checks). Run npm commands from the repository root; their names are unchanged. API source CLIs remain in `packages/api/src/scripts/` and compile to `dist/scripts/`.
 
 `APP_MODE=demo` is for public exploration without real SSH. `APP_MODE=local` is for managing real infrastructure and requires a dashboard administrator password; set it with `npm run set-dashboard-password` (or the corresponding production script). `STORAGE_DRIVER=json` is the default when running directly; Compose uses PostgreSQL and automatically runs migrations. See the [architecture](docs/architecture.md), [security model](docs/security.md), and [demo guide](docs/demo.md) for details.
 

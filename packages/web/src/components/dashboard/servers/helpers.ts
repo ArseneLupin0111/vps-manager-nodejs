@@ -1,7 +1,7 @@
-/** Format bytes as human-readable string (B/KB/MB/GB/TB). */
+/** Format byte counts in explicit binary units (B/KiB/MiB/GiB/TiB). */
 export function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "n/a";
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let next = value;
   let index = 0;
   while (next >= 1024 && index < units.length - 1) {

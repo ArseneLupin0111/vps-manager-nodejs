@@ -1,5 +1,5 @@
 /**
- * Thin entry point for local dev (runs via `tsx scripts/set-dashboard-password.ts`).
+ * Thin entry point for local dev (runs via `tsx scripts/admin/set-dashboard-password.ts`).
  *
  * In production, use the compiled version:
  *   node dist/scripts/set-dashboard-password.js --stdin < password.txt
@@ -9,6 +9,6 @@
  * which compiles to dist/scripts/set-dashboard-password.js during `npm run build`.
  */
 
-import { setDashboardPasswordFromCli } from "../packages/api/src/scripts/set-dashboard-password.js";
+import { setDashboardPasswordFromCli } from "../../packages/api/src/scripts/set-dashboard-password.js";
 
 setDashboardPasswordFromCli();

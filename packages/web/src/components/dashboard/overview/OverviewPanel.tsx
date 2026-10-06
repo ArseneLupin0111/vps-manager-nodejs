@@ -1,6 +1,7 @@
+import { Link } from "react-router-dom";
 import { Alert } from "../../ui/alert";
 import type { DashboardOverview } from "../../../lib/api";
-import { formatBytes } from "../shared/formatBytes";
+import { formatBytes } from "../servers/helpers";
 import { AuditPanel } from "../audit/AuditPanel";
 import { JobsPanel } from "../jobs/JobsPanel";
 import { ResourceGauge } from "../shared/ResourceGauge";
@@ -43,17 +44,17 @@ function Kpi({
           ? "text-dim"
           : "text-text";
   return (
-    <div className="min-w-0 border border-line bg-panel p-4">
-      <p className="truncate text-[11px] uppercase tracking-[0.14em] text-dim">
+    <div className="min-w-0 border border-line bg-panel px-4 py-3">
+      <p className="text-[12px] uppercase tracking-wider text-dim">
         {label}
       </p>
       <p
-        className={`tnum mt-1.5 truncate text-2xl font-medium ${valueTone}`}
+        className={`tnum mt-1 truncate text-xl font-medium ${valueTone}`}
         title={value}
       >
         {value}
       </p>
-      <p className="mt-0.5 truncate text-[12px] text-dim" title={sub}>
+      <p className="mt-1 text-[12px] leading-5 text-dim">
         {sub}
       </p>
     </div>
@@ -96,11 +97,12 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
   const containersValue = docker?.available
     ? `${docker.containerRunning}/${docker.containerTotal}`
     : "n/a";
-  const containersTone: KpiTone = docker?.available
-    ? docker.containerTotal - docker.containerRunning > 0
-      ? "warn"
-      : "ok"
-    : "idle";
+  const containersTone: KpiTone = docker?.available ? "ok" : "idle";
+  const notRunning = docker?.available
+    ? Math.max(0, docker.containerTotal - docker.containerRunning)
+    : 0;
+  const failedJobs = overview.jobs.filter((job) => job.status === "failed").length;
+  const runningJobs = overview.jobs.filter((job) => job.status === "running").length;
 
   const sysCells = [
     {
@@ -119,8 +121,8 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
           .join(" ") || "n/a",
     },
     {
-      label: "CPU",
-      value: sysInfo?.cpu?.model || "n/a",
+      label: "Provider",
+      value: server?.provider || "Not reported",
     },
     {
       label: "Location",
@@ -133,9 +135,19 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
   return (
     <div className="grid min-w-0 gap-4">
       <DemoBanner overview={overview} />
-      <section className="grid grid-cols-2 gap-3" aria-label="Server status">
-        <Kpi label="Status" value={statusValue} sub={server?.provider || "Provider not set"} tone={statusTone} />
-        <Kpi label="Containers" value={containersValue} sub={docker?.available ? "Running / total" : "Docker snapshot inactive"} tone={containersTone} />
+      {failedJobs > 0 ? (
+        <Alert variant="destructive" className="flex flex-wrap items-center justify-between gap-2">
+          <span>{failedJobs} recent {failedJobs === 1 ? "job failed" : "jobs failed"}. Host health is reported separately.</span>
+          <Link to="jobs" className="font-medium underline underline-offset-4">Review failed jobs</Link>
+        </Alert>
+      ) : null}
+      <section className="grid gap-3 sm:grid-cols-3" aria-label="Server status">
+        <Kpi label="Host health" value={statusValue} sub="Host status only · excludes jobs and containers" tone={statusTone} />
+        <div className="min-w-0">
+          <Kpi label="Containers" value={containersValue} sub={docker?.available ? `Running / total${docker.freshness === "stale" ? " · stale snapshot" : ""}` : "Docker data unavailable"} tone={containersTone} />
+          {notRunning > 0 ? <Link to="docker" className="mt-1 inline-block text-[12px] text-dim underline underline-offset-4">{notRunning} not running · Review containers</Link> : null}
+        </div>
+        <Kpi label="Recent jobs" value={failedJobs ? `${failedJobs} failed` : `${runningJobs} running`} sub={failedJobs ? `${runningJobs} running · Review errors below` : "Background tasks · separate from host health"} tone={failedJobs ? "crit" : "ok"} />
       </section>
       <section className="grid min-w-0 gap-px border border-line bg-line md:grid-cols-3" aria-label="Server overview">
         <ResourceGauge label="CPU" value={cpuPct} detail={sysInfo?.cpu?.model || "Awaiting snapshot"} />
@@ -144,18 +156,18 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
       </section>
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         <ChartPanel title="CPU & Memory" hint="Utilization history · percent" series={cpuMemory} />
-        <ChartPanel title="Network I/O" hint="Throughput (B/s) · unknown units render n/a" series={netSeries} readouts={[
+        <ChartPanel title="Network I/O" hint="Receive / transmit throughput · bytes per second" series={netSeries} readouts={[
           { label: "RX", value: formatNetworkValue(metric, "networkRx") },
           { label: "TX", value: formatNetworkValue(metric, "networkTx") },
         ]} />
       </div>
-      <SystemFacts facts={sysCells} />
 
       {/* Audit / jobs split */}
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[1.5fr_1fr]">
+      <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[1.5fr_1fr]">
         <AuditPanel events={overview.auditEvents.slice(0, 5)} compact />
         <JobsPanel jobs={overview.jobs.slice(0, 5)} compact />
       </div>
+      <SystemFacts facts={sysCells} />
 
     </div>
   );

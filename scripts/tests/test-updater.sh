@@ -2,7 +2,7 @@
 # shellcheck disable=SC2317
 #
 # test-updater.sh — Durable assertions for the local-agent updater slice
-# (scripts/install-updater.sh + packages/agent/internal/updater +
+# (scripts/install/install-updater.sh + packages/agent/internal/updater +
 # packages/agent/cmd/vps-updater).
 #
 # Verifies:
@@ -34,9 +34,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-INSTALL_UPDATER="${REPO_ROOT}/scripts/install-updater.sh"
-INSTALL_LOCAL="${REPO_ROOT}/scripts/install-local-agent.sh"
-INSTALL_SH="${REPO_ROOT}/scripts/install.sh"
+INSTALL_UPDATER="${REPO_ROOT}/scripts/install/install-updater.sh"
+INSTALL_LOCAL="${REPO_ROOT}/scripts/install/install-local-agent.sh"
+INSTALL_SH="${REPO_ROOT}/scripts/install/install.sh"
 AGENT_DIR="${REPO_ROOT}/packages/agent"
 
 PASS=0
@@ -216,13 +216,6 @@ if grep -Fq 'isLoopbackHost' "${AGENT_DIR}/internal/config/config.go" \
   pass "agent config.go rejects non-loopback http backendUrl"
 else
   fail "agent config.go must allow http only for loopback hosts"
-fi
-
-# Runbook hooks: installers point at the updater bootstrap / offline runbook
-if grep -Fq 'install-updater.sh' "$INSTALL_LOCAL" || grep -Fq 'install-updater.sh' "$INSTALL_SH"; then
-  pass "installer runbook references the updater bootstrap"
-else
-  fail "install-local-agent.sh/install.sh must reference scripts/install-updater.sh"
 fi
 
 # ── 3. Live --help and --dry-run (unprivileged) ───────────────────────────

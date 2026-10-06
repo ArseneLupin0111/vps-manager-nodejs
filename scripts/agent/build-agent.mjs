@@ -19,7 +19,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = join(__dirname, "..");
+const root = join(__dirname, "..", "..");
 const agentDir = join(root, "packages", "agent");
 const outputDir = join(agentDir, "dist");
 const agentOutputPath = join(outputDir, "vps-agent-linux-amd64");

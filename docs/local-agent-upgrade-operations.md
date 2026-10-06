@@ -18,7 +18,7 @@ node scripts/release/verify-manifest.mjs \
 Bootstrap `vps-updater` from the **updater** entry. The installer itself requires the signed manifest plus exactly one of `--pubkey` / `--pubkey-file` / `--pubkey-env`, verifies the signature with `scripts/release/verify-manifest.mjs`, and selects the exact `component: "updater"` / `os` / `arch` entry — it fails closed if that entry is missing or duplicated:
 
 ```bash
-sudo ./scripts/install-updater.sh \
+sudo ./scripts/install/install-updater.sh \
   --binary ./vps-updater-linux-amd64 \
   --config ./updater-config.json \
   --manifest ./manifest.json \
@@ -32,7 +32,7 @@ Rotate a signing key by publishing a new trusted public key to both API and host
 
 ## Bootstrap and authorization
 
-Install the updater separately from the local metrics agent: it uses a scoped updater credential bound to the local VPS, not a dashboard cookie or metrics token. Generate this credential using the API bootstrap command, transfer it to the host over a secure operator channel, and place it in the root-owned updater config alongside the pinned release key and HTTPS API URL. Follow `scripts/install-updater.sh --help` for the supported installation/uninstall flags. Bootstrap is explicit and manual; an API image deploy never invokes this installer. Inspect the generated systemd service and privileged helper policies before enabling. The updater downloads signed artifacts and requests only fixed agent-binary swap/restart actions; no request can supply a shell command, binary path, systemd unit, arbitrary URL or release signing key.
+Install the updater separately from the local metrics agent: it uses a scoped updater credential bound to the local VPS, not a dashboard cookie or metrics token. Generate this credential using the API bootstrap command, transfer it to the host over a secure operator channel, and place it in the root-owned updater config alongside the pinned release key and HTTPS API URL. Follow `scripts/install/install-updater.sh --help` for the supported installation/uninstall flags. Bootstrap is explicit and manual; an API image deploy never invokes this installer. Inspect the generated systemd service and privileged helper policies before enabling. The updater downloads signed artifacts and requests only fixed agent-binary swap/restart actions; no request can supply a shell command, unit name, or arbitrary destination.
 
 Limit updater credentials to a single local VPS and rotate/revoke them independently of metrics credentials. A credential leak warrants immediate revocation and host inspection. An updater that is absent or unhealthy leaves the dashboard in manual-instructions mode; it must not show an actionable upgrade button.
 

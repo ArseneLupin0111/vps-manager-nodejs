@@ -63,7 +63,7 @@ jobs:
         env:
           AGENT_VERSION: ${{ steps.identity.outputs.version }}
           AGENT_BUILD_ID: ${{ github.sha }}
-        run: node scripts/build-agent.mjs
+        run: node scripts/agent/build-agent.mjs
 
       - name: Verify binary identities before anything is published
         id: artifact

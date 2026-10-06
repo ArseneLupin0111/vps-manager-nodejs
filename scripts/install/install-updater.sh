@@ -6,7 +6,7 @@
 # install: CI/deploy never runs this silently.
 #
 # Usage:
-#   sudo ./install-updater.sh --binary <path> --config <path> [options]
+#   sudo ./scripts/install/install-updater.sh --binary <path> --config <path> [options]
 #
 # Options:
 #   --binary <path>       Path to the vps-updater binary (required).
@@ -79,7 +79,7 @@ UNIT_PATH="/etc/systemd/system/vps-updater-apply.path"
 UNIT_HELPER="/etc/systemd/system/vps-updater-apply.service"
 # Ed25519 manifest verification runs offline via the repo's existing CLI.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERIFY_MANIFEST_CLI="${SCRIPT_DIR}/release/verify-manifest.mjs"
+VERIFY_MANIFEST_CLI="${SCRIPT_DIR}/../release/verify-manifest.mjs"
 # The install target is always a Linux systemd host, whatever platform the
 # operator previews it from; arch follows the running machine.
 TARGET_OS="linux"
@@ -129,7 +129,7 @@ while [[ $# -gt 0 ]]; do
       exit 0 ;;
     *)
       echo "Error: Unknown argument: $1" >&2
-      echo "Usage: sudo ./install-updater.sh --binary <path> --config <path> --manifest <path> (--pubkey <b64>|--pubkey-file <path>|--pubkey-env <name>) [--dry-run|--uninstall]" >&2
+      echo "Usage: sudo ./scripts/install/install-updater.sh --binary <path> --config <path> --manifest <path> (--pubkey <b64>|--pubkey-file <path>|--pubkey-env <name>) [--dry-run|--uninstall]" >&2
       exit 1 ;;
   esac
 done
@@ -233,7 +233,7 @@ if [[ -n "$PUBKEY_FILE" && ! -f "$PUBKEY_FILE" ]]; then
 fi
 if [[ ! -f "$VERIFY_MANIFEST_CLI" ]]; then
   echo "Error: verify-manifest.mjs not found: ${VERIFY_MANIFEST_CLI}" >&2
-  echo "  install-updater.sh must ship alongside scripts/release/verify-manifest.mjs." >&2
+  echo "  install-updater.sh must ship alongside ../release/verify-manifest.mjs (scripts/install/ + scripts/release/)." >&2
   exit 1
 fi
 if ! command -v node &>/dev/null; then
