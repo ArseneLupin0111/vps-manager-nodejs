@@ -13,7 +13,7 @@
 //	version — print the updater's own build identity and exit
 //
 // The updater binary is static Go (stdlib only) and never shells out to
-// node. scripts/build-agent.mjs builds it for Linux/amd64 alongside the
+// node. scripts/agent/build-agent.mjs builds it for Linux/amd64 alongside the
 // metrics agent; the signed release manifest publishes both artifacts.
 package main
 

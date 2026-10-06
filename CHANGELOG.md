@@ -12,6 +12,7 @@
 
 - Group operational scripts into `agent/`, `vps/`, `admin/`, and `install/`; retain `ci/`, `release/`, and `tests/`.
 - Update npm commands, CI filters, installer download URLs, relative imports, shell checks, and operator instructions to the new paths. npm command names and production `dist/scripts/` paths are unchanged.
+- Restore the tracked executable bit on `scripts/install/install-updater.sh` after relocation so Linux bootstrap smoke checks and documented direct invocation do not fail with `Permission denied`.
 
 ## Unreleased — Recharts telemetry charts
 
