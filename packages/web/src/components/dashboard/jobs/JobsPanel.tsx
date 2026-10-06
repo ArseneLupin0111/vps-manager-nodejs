@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { MoreHorizontal } from "lucide-react";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
@@ -32,7 +33,16 @@ export function JobsPanel({
   compact?: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get("status");
+  const [statusFilter, setStatusFilter] = useState(
+    initialStatus &&
+      ["all", "queued", "running", "succeeded", "failed", "cancelled"].includes(
+        initialStatus,
+      )
+      ? initialStatus
+      : "all",
+  );
   const [typeFilter, setTypeFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"compact" | "detailed">("compact");
   const running = jobs.filter((job) => job.status === "running").length;
@@ -72,7 +82,7 @@ export function JobsPanel({
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="truncate">Recent jobs</CardTitle>
             <Badge
-              variant={failed ? "destructive" : running ? "pending" : "outline"}
+              variant={running ? (failed ? "destructive" : "pending") : "secondary"}
             >
               {failed ? `${failed} failed · ` : ""}{running} running
             </Badge>
@@ -223,7 +233,8 @@ function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
             {job.type}
           </strong>
           <p
-            className="mt-1 break-words text-[13px] leading-6 text-dim"
+            className="mt-1 whitespace-normal break-words text-[13px] leading-6 text-dim"
+            title={meta}
           >
             {meta}
           </p>
@@ -234,6 +245,7 @@ function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
       </div>
       {job.status === "failed" ? <p className="break-words text-[13px] text-text">{job.errorMessage || "Failure reason not reported."}</p> : null}
       {job.finishedAt ? <time dateTime={job.finishedAt} className="text-[12px] text-dim">Finished {formatDate(job.finishedAt)}</time> : null}
+      {!job.finishedAt && job.startedAt ? <time dateTime={job.startedAt} className="text-[12px] text-dim">Started {formatDate(job.startedAt)}</time> : null}
       {job.errorLogUrl ? <a href={job.errorLogUrl} target="_blank" rel="noopener noreferrer" className="w-fit text-[12px] text-text underline underline-offset-4">View log</a> : null}
       {isRunning ? (
       <div
@@ -250,6 +262,7 @@ function CompactJobRow({ job }: { job: DashboardOverview["jobs"][number] }) {
         />
       </div>
       ) : null}
+      <Link to={`/vps/${encodeURIComponent(job.vpsId)}/jobs`} className="w-fit text-[12px] text-signal underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-signal">View details</Link>
     </article>
   );
 }

@@ -138,7 +138,7 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
       {failedJobs > 0 ? (
         <Alert variant="destructive" className="flex flex-wrap items-center justify-between gap-2">
           <span>{failedJobs} recent {failedJobs === 1 ? "job failed" : "jobs failed"}. Host health is reported separately.</span>
-          <Link to="jobs" className="font-medium underline underline-offset-4">Review failed jobs</Link>
+          <Link to="jobs?status=failed" className="font-medium underline underline-offset-4">Review failed jobs</Link>
         </Alert>
       ) : null}
       <section className="grid gap-3 sm:grid-cols-3" aria-label="Server status">

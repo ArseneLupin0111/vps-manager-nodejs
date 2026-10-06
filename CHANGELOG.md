@@ -29,6 +29,12 @@
 
 - Reduce fleet cards to agent/access status, a short version, and one update badge; omit repeated labels, heartbeat text, commit hashes, and completed upgrade confirmations from compact card/table summaries.
 - Keep active upgrade progress and recovery warnings visible; retain full build identity, heartbeat details, and upgrade history in workspace settings and confirmation dialogs.
+## Unreleased — overview operational clarity
+
+- Keep the breadcrumb header in document flow so it does not obscure overview cards when scrolling or capturing a full page; retain the sticky fleet sidebar.
+- Label workspace health as host status, separate from job outcomes, and show an overview failure summary linking to the failed-jobs filter.
+- Show recent job timestamps, available failure messages and log links, with explicit failed-at progress and a neutral zero-running badge.
+- Reduce overview audit rows to Time, Event, Result, and Details while retaining the full audit filters and details drawer.
 
 ## Unreleased — Docker ingest replay recovery
 

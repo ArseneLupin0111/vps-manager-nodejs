@@ -103,31 +103,133 @@ export function AuditPanel({
     terminal: events.filter((event) => event.resourceType === "terminal")
       .length,
   };
-  const displayedEvents = compact ? events.slice(0, 5) : visibleEvents;
+  const displayedEvents = visibleEvents;
+  if (compact) {
+    return (
+      <Card className="min-w-0 max-w-full overflow-hidden">
+        <CardHeader className="min-w-0 border-b border-line p-4 pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="truncate">Recent audit</CardTitle>
+              <CardDescription>
+                Latest security and operations events.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="min-w-0 overflow-hidden p-0">
+          {displayedEvents.length ? (
+            <div className="min-w-0">
+              <div className="hidden grid-cols-[minmax(0,11rem)_minmax(0,1fr)_auto_auto] gap-3 bg-raised px-4 py-2.5 text-[11px] uppercase tracking-[0.14em] text-dim sm:grid">
+                <span>Time</span>
+                <span>Event</span>
+                <span>Result</span>
+                <span>Details</span>
+              </div>
+              <div className="divide-y divide-line">
+                {displayedEvents.map((event) => {
+                  const severity =
+                    event.severity ||
+                    (event.result === "success" ? "info" : "warning");
+                  const isCritical = severity === "critical";
+                  const detail =
+                    event.reason ||
+                    event.jobId ||
+                    event.requestId ||
+                    event.authMethod ||
+                    event.client;
+                  return (
+                    <article
+                      key={event.id}
+                      className="grid min-w-0 gap-2 px-4 py-3 text-[13px] leading-6 text-dim transition-colors hover:bg-raised sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_auto_auto] sm:items-center"
+                    >
+                      <span className="tnum text-dim sm:whitespace-nowrap">
+                        {formatDate(event.timestamp)}
+                      </span>
+                      <span className="flex min-w-0 items-start gap-2 text-text">
+                        <span
+                          className={`mt-1 shrink-0 ${isCritical ? "text-crit" : "text-dim"}`}
+                        >
+                          {isCritical ? (
+                            <AlertTriangle size={16} />
+                          ) : (
+                            <Activity size={16} />
+                          )}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block break-words font-medium">
+                            {event.actionLabel || event.action}
+                          </span>
+                          <span className="tnum block break-all font-mono text-[11px] text-dim">
+                            {event.actionLabel
+                              ? event.eventCode || event.action
+                              : ""}
+                          </span>
+                          {detail ? (
+                            <span className="block break-words text-[12px] text-dim">
+                              {event.reason
+                                ? `Reason: ${event.reason}`
+                                : String(detail)}
+                            </span>
+                          ) : null}
+                        </span>
+                      </span>
+                      <Badge
+                        className="w-fit uppercase"
+                        variant={
+                          event.result === "success"
+                            ? "ready"
+                            : "destructive"
+                        }
+                      >
+                        {event.result}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 w-fit px-2 text-xs"
+                        onClick={() => setSelectedEvent(event)}
+                      >
+                        Details
+                      </Button>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="p-4">
+              <EmptyState>No audit events yet.</EmptyState>
+            </div>
+          )}
+          {selectedEvent ? (
+            <AuditDetailsDrawer
+              event={selectedEvent}
+              onClose={() => setSelectedEvent(null)}
+            />
+          ) : null}
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="min-w-0 max-w-full overflow-hidden">
       <CardHeader className="min-w-0 border-b border-line p-4 pb-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle className="truncate">
-              {compact ? "Recent audit" : "Audit"}
-            </CardTitle>
+            <CardTitle className="truncate">Audit</CardTitle>
             <CardDescription>
-              {compact
-                ? "Latest security and operations events."
-                : "Review security, SSH access, jobs, and terminal activity."}
+              Review security, SSH access, jobs, and terminal activity.
             </CardDescription>
           </div>
-          {!compact ? (
-            <Badge variant={summary.critical ? "destructive" : "secondary"}>
-              {summary.critical} critical
-            </Badge>
-          ) : null}
+          <Badge variant={summary.critical ? "destructive" : "secondary"}>
+            {summary.critical} critical
+          </Badge>
         </div>
       </CardHeader>
       <CardContent className="min-w-0 overflow-hidden p-0">
-        {!compact ? (
-          <div className="border-b border-line">
+        <div className="border-b border-line">
             <section className="grid gap-3 border-b border-line p-4 xl:grid-cols-[minmax(0,1fr)_155px_145px_145px_165px_130px]">
               <Input
                 aria-label="Search audit events"
@@ -234,8 +336,7 @@ export function AuditPanel({
                 value={summary.terminal}
               />
             </section>
-          </div>
-        ) : null}
+        </div>
         {displayedEvents.length ? (
           <div className="min-w-0">
             {compact ? (

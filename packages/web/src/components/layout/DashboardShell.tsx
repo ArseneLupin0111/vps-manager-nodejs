@@ -68,7 +68,7 @@ export function DashboardShell({
     <main className="min-h-screen w-full bg-ink text-text lg:flex">
       <FleetSidebar hosts={hosts} metrics={metrics} selectedHostId={isWorkspace ? pathname.split("/")[2] : undefined} />
       <div className="min-w-0 flex-1">
-      <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-line bg-ink px-4 sm:px-6">
+      <header className="flex h-14 items-center justify-between gap-3 border-b border-line bg-ink px-4 sm:px-6">
         <nav
           aria-label="Dashboard context"
           className="flex min-w-0 flex-1 items-center gap-2 text-[13px] sm:gap-3"
