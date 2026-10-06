@@ -393,11 +393,10 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
     }
   }
 
-  // Dense (card/table) variants render no Compatibility/Release detail rows:
-  // when the Upgrade button is hidden (available === null) surface the
-  // specific incompatible/unavailable reason next to the state chip instead
-  // of a chip-only row.
-  const denseReason =
+  // Dense (card/table) keeps a single badge: when the Upgrade button is
+  // hidden (available === null) the specific incompatible/unavailable reason
+  // lives on the badge title only — no inline duplicate paragraph.
+  const denseBadgeTitle =
     dense && !upgradeReason && status
       ? status.state === "incompatible"
         ? INCOMPATIBLE_REASONS[status.compatibility.reason]
@@ -405,18 +404,32 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
           ? STATE_DISABLED_REASONS.release_unavailable
           : null
       : null;
-  const displayedReason = upgradeReason ?? denseReason;
+  const displayedReason = upgradeReason;
 
-  const installedText = installed
+  const dialogInstalledText = installed
     ? installed.buildId
       ? `Agent ${installed.version ?? "unknown"} (${shortBuild(installed.buildId)})`
       : `Agent ${installed.version ?? "unknown"}`
     : null;
-  const heartbeatText = installed
+  const dialogHeartbeatText = installed
     ? installed.fresh
       ? `heartbeat ${freshnessLabel(installed.lastSeenAt ?? undefined)}`
       : `heartbeat stale (${freshnessLabel(installed.lastSeenAt ?? undefined)})`
     : null;
+  const installedText = dense
+    ? installed?.version
+      ? `v${installed.version}`
+      : null
+    : dialogInstalledText;
+  // Dense fleet rows omit the heartbeat line entirely (freshness lives in
+  // the Agent online/offline signal); workspace keeps the full detail.
+  const heartbeatText = dense
+    ? null
+    : installed
+      ? installed.fresh
+        ? `heartbeat ${freshnessLabel(installed.lastSeenAt ?? undefined)}`
+        : `heartbeat stale (${freshnessLabel(installed.lastSeenAt ?? undefined)})`
+      : null;
 
   let liveContent: React.ReactNode = null;
   if (activeJob) {
@@ -454,7 +467,12 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
   } else if (resultJob) {
     const completedAt = resultJob.completedAt ?? undefined;
     const finishedAt = completedAt ? `completed ${freshnessLabel(completedAt)}` : "";
-    if (resultJob.state === "succeeded") {
+    // Dense fleet rows never replay an old success: the installed version +
+    // state badge already carry that signal. Workspace keeps the full
+    // confirmation; dense keeps failed/rollback warnings visible.
+    if (dense && resultJob.state === "succeeded") {
+      liveContent = null;
+    } else if (resultJob.state === "succeeded") {
       const confirmedBuild =
         resultJob.result?.heartbeatBuildId ??
         resultJob.result?.reportedBuildId ??
@@ -580,15 +598,18 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
   const details = status ? (
     <>
       <div className={dense ? "flex flex-wrap items-center gap-x-2 gap-y-1" : "flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"}>
-        {dense && variant === "card" ? <span className="text-dim">Update</span> : null}
-        {installedText ? <span className="text-text">{installedText}</span> : null}
+        {installedText ? <span className="text-text" title={dense ? dialogInstalledText ?? undefined : undefined}>{installedText}</span> : null}
         {heartbeatText ? (
           <span className={`text-[11px] ${installed?.fresh ? "text-dim" : "text-warn/80"}`} title={formatDate(installed?.lastSeenAt ?? undefined)}>
             {heartbeatText}
           </span>
         ) : null}
         {chip ? (
-          <Badge variant={chip.variant} className="text-[10px] uppercase tracking-wide">
+          <Badge
+            variant={chip.variant}
+            className="text-[10px] uppercase tracking-wide"
+            title={denseBadgeTitle ?? undefined}
+          >
             {chip.label}
           </Badge>
         ) : null}
@@ -627,9 +648,11 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
           <div className={dense ? "mt-1" : "mt-2"}>{liveContent}</div>
         ) : null}
       </div>
-      <div className={dense ? "mt-1 flex flex-wrap items-center gap-2" : "mt-2 flex flex-wrap items-center gap-2"}>
-        {actions}
-      </div>
+      {showUpgrade || showInstructions ? (
+        <div className={dense ? "mt-1 flex flex-wrap items-center gap-2" : "mt-2 flex flex-wrap items-center gap-2"}>
+          {actions}
+        </div>
+      ) : null}
       {displayedReason ? (
         <p id={reasonId} className="mt-1 text-[11px] text-dim">{displayedReason}</p>
       ) : null}
@@ -697,8 +720,8 @@ export function LocalAgentUpdate({ vps, variant }: LocalAgentUpdateProps) {
               <div className="flex justify-between gap-4">
                 <span className="text-dim">Current</span>
                 <span className="text-right">
-                  {installedText ?? "Unknown"}
-                  {heartbeatText ? ` · ${heartbeatText}` : ""}
+                  {dialogInstalledText ?? "Unknown"}
+                  {dialogHeartbeatText ? ` · ${dialogHeartbeatText}` : ""}
                 </span>
               </div>
               <div className="flex justify-between gap-4">

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — compact agent status
+
+- Reduce fleet cards to agent/access status, a short version, and one update badge; omit repeated labels, heartbeat text, commit hashes, and completed upgrade confirmations from compact card/table summaries.
+- Keep active upgrade progress and recovery warnings visible; retain full build identity, heartbeat details, and upgrade history in workspace settings and confirmation dialogs.
+
 ## Unreleased — Docker ingest replay recovery
 
 - Use receive-time-independent ingest digests so retained agent batches can retry after a lost acknowledgment.

@@ -255,32 +255,6 @@ describe("LocalAgentUpdate disabled upgrade control", () => {
     expect(reason).toHaveTextContent(/heartbeat is stale or the build ID is missing/);
   });
 
-  it("shows the incompatible reason in the dense table row when no upgrade button is rendered", async () => {
-    handler = () =>
-      ok(
-        status({
-          state: "incompatible",
-          available: null,
-          compatibility: { compatible: false, apiContractVersion: 1, reason: "unsupported_architecture" },
-        }),
-      );
-    render(<LocalAgentUpdate vps={vps} variant="table" />);
-
-    expect(await screen.findByText("Update blocked")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Upgrade agent" })).not.toBeInTheDocument();
-    expect(
-      screen.getByText("No release artifact matches this host's operating system and architecture."),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the release-unavailable reason in the dense card row when no upgrade button is rendered", async () => {
-    handler = () => ok(status({ state: "release_unavailable", available: null }));
-    render(<LocalAgentUpdate vps={vps} variant="card" />);
-
-    expect(await screen.findByText("Release unavailable")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Upgrade agent" })).not.toBeInTheDocument();
-    expect(screen.getByText("The release catalog is unavailable — try again shortly.")).toBeInTheDocument();
-  });
 });
 
 describe("LocalAgentUpdate live SSE refresh", () => {
@@ -393,6 +367,34 @@ describe("LocalAgentUpdate manual instructions", () => {
 });
 
 describe("LocalAgentUpdate terminal results", () => {
+  it("hides a stale succeeded job in dense card rows while workspace keeps the confirmation", async () => {
+    const payload = status({
+      installed: { version: "0.1.0", buildId: CURRENT_BUILD, lastSeenAt: new Date().toISOString(), fresh: true },
+      state: "release_unavailable",
+      available: null,
+      compatibility: { compatible: false, apiContractVersion: 1, reason: "release_unavailable" },
+      job: job({
+        state: "succeeded",
+        progress: 100,
+        releaseVersion: "0.1.0",
+        releaseBuildId: CURRENT_BUILD,
+        completedAt: "2026-09-27T10:05:00.000Z",
+        result: { outcome: "succeeded", reportedBuildId: CURRENT_BUILD, heartbeatBuildId: CURRENT_BUILD, completedAt: "2026-09-27T10:05:00.000Z" },
+      }),
+    });
+    handler = () => ok(payload);
+    const { unmount } = render(<LocalAgentUpdate vps={vps} variant="card" />);
+
+    await screen.findByText("Release unavailable");
+    expect(screen.queryByText(/Upgrade confirmed/)).not.toBeInTheDocument();
+    unmount();
+    cleanup();
+    handler = () => ok(payload);
+    render(<LocalAgentUpdate vps={vps} variant="workspace" />);
+    expect(await screen.findByText(/is sending a fresh heartbeat/)).toBeInTheDocument();
+  });
+
+
   it("shows a succeeded upgrade confirmed by the fresh heartbeat build", async () => {
     handler = () =>
       ok(

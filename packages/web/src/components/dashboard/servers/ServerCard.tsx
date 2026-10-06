@@ -333,9 +333,12 @@ export function ServerCard({
             onEdit={() => window.setTimeout(() => onEdit(vps), 0)}
           />
           </div>
-          <div className="grid min-w-0 grid-cols-2 gap-x-5 gap-y-1 text-xs xl:order-first xl:grid-cols-1">
-            <div className="flex items-center gap-2"><span className="text-dim">Agent</span><AgentLifecycleStatus vps={vps} jobs={jobs} compact /></div>
-            <div className="flex items-center gap-2"><span className="text-dim">Access</span><span className={isReady ? "text-signal" : "text-warn"}>{isLocalHost ? "Local" : isReady ? "Key ready" : "Needs password"}</span></div>
+          <div className="flex min-w-0 flex-col gap-1 text-xs xl:order-first">
+            <div className="flex flex-wrap items-center gap-2">
+              <AgentLifecycleStatus vps={vps} jobs={jobs} compact />
+              <span aria-hidden="true" className="text-dim">·</span>
+              <span className={isReady ? "text-signal" : "text-warn"}>{isLocalHost ? "Local" : isReady ? "Key ready" : "Needs password"}</span>
+            </div>
             {isLocalHost ? <LocalAgentUpdate vps={vps} variant="card" /> : null}
           </div>
         </div>
