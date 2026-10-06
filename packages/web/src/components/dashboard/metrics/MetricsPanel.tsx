@@ -1,5 +1,15 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { chipVariant, freshnessLabel } from "../../../lib/dashboard-formatters";
@@ -326,7 +336,6 @@ export function ChartPanel({
     (sum, entry) => sum + entry.points.length,
     0,
   );
-  const gid = title.toLowerCase().replace(/[^a-z]+/g, "-");
   return (
     <section className="border border-line bg-panel">
       <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
@@ -368,7 +377,7 @@ export function ChartPanel({
       </header>
       <div className="px-4 py-4">
         {withPoints.length ? (
-          <TrendChart gid={gid} series={withPoints} />
+          <TrendChart series={withPoints} />
         ) : (
           <div className="px-4 py-8 text-center">
             <div className="text-[13px] font-medium">
@@ -388,168 +397,197 @@ export function ChartPanel({
   );
 }
 
-function TrendChart({ gid, series }: { gid: string; series: ChartSeries[] }) {
+type TrendRow = { t: number; [key: string]: number | null };
+
+/**
+ * Chronological union of every series timestamp, keyed by series key so
+ * mismatched or sparse sample sets line up. Missing entries stay null so
+ * Recharts breaks the line instead of interpolating or implying zero.
+ */
+function alignRows(plotted: ChartSeries[]): TrendRow[] {
+  const byTime: Record<number, TrendRow> = {};
+  for (const entry of plotted) {
+    for (const point of entry.points) {
+      const t = Date.parse(point.t);
+      if (!Number.isFinite(t)) continue;
+      const existing = byTime[t] ?? { t };
+      existing[entry.key] =
+        typeof point.value === "number" && Number.isFinite(point.value)
+          ? point.value
+          : null;
+      byTime[t] = existing;
+    }
+  }
+  const rows = Object.values(byTime).sort((a, b) => a.t - b.t);
+  for (const row of rows) {
+    for (const entry of plotted) {
+      if (!(entry.key in row)) row[entry.key] = null;
+    }
+  }
+  return rows;
+}
+
+function TrendTooltip({
+  active,
+  payload,
+  label,
+  unit,
+}: {
+  active?: boolean;
+  payload?: Array<{
+    name?: string;
+    value?: unknown;
+    color?: string;
+    dataKey?: string | number;
+  }>;
+  label?: unknown;
+  unit?: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const when =
+    typeof label === "number" && Number.isFinite(label)
+      ? new Date(label).toLocaleString()
+      : "Unknown time";
+  return (
+    <div className="border border-line bg-raised px-2 py-1 text-[11px] text-text">
+      <p className="tnum text-dim">{when}</p>
+      {payload.map((entry) => {
+        const raw = entry.value;
+        const text =
+          typeof raw === "number" && Number.isFinite(raw)
+            ? unit === "bytes/s"
+              ? formatThroughput(raw)
+              : `${raw.toFixed(1)}%`
+            : "unavailable";
+        return (
+          <p key={String(entry.dataKey ?? entry.name)} className="tnum mt-0.5">
+            <span style={{ color: entry.color }}>{entry.name}</span>
+            {": "}
+            {text}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function TrendChart({ series }: { series: ChartSeries[] }) {
+  // React useId emits colons (":r0:") which break SVG url(#…) references.
+  const gradientId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   // ChartPanel already gates on >=2 valid points; double-check here.
   const plotted = series.filter(
     (entry) => entry.points.filter((point) => point.value !== null).length >= 2,
   );
-  const timestamps = plotted[0]?.points.map((point) => point.t) ?? [];
+  const data = alignRows(plotted);
+  const unit = plotted[0]?.unit;
+  const isPercent = unit === "%";
   const validValues = plotted.flatMap((entry) =>
     entry.points.flatMap((point) =>
       point.value === null ? [] : [point.value],
     ),
   );
-  const maxPoint = Math.max(...validValues, 1);
-  const unit = plotted[0]?.unit;
-  const width = 100;
-  const height = 56;
-  const top = 6;
-  const bottom = 50;
-  const slotCount = Math.max(
-    ...plotted.map((entry) => entry.points.length),
-    1,
+  // Percent is bounded 0..100; network stays data-driven and never negative.
+  // Thresholds remain visible by widening the upper bound when supplied.
+  const highest = Math.max(...validValues, 1);
+  const top = Math.max(
+    highest,
+    ...plotted.flatMap((entry) =>
+      entry.threshold === undefined ? [] : [entry.threshold],
+    ),
   );
-  const pointAt = (entry: ChartSeries, index: number) => {
-    const point = entry.points[index];
-    if (!point || point.value === null) return null;
-    const x = (index / Math.max(slotCount - 1, 1)) * width;
-    const y = bottom - (point.value / maxPoint) * (bottom - top);
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  };
-  // Split each series into runs of consecutive non-gap points so null gaps
-  // break the line instead of interpolating or zero-filling.
-  const segmentsOf = (entry: ChartSeries) => {
-    const runs: string[][] = [];
-    let run: string[] = [];
-    entry.points.forEach((point, index) => {
-      const coord = pointAt(entry, index);
-      if (coord === null) {
-        if (run.length >= 2) runs.push(run);
-        run = [];
-        return;
-      }
-      run.push(coord);
-    });
-    if (run.length >= 2) runs.push(run);
-    return runs.map((coords) => coords.join(" "));
-  };
-  const firstLabel = timestamps[0] ? formatChartTime(timestamps[0]) : "";
-  const lastStamp = timestamps.length
-    ? timestamps[timestamps.length - 1]
-    : undefined;
-  const lastLabel =
-    timestamps.length > 1 && lastStamp ? formatChartTime(lastStamp) : "now";
-  const ticks = [0, 1, 2, 3].map((index) => {
-    const value = (maxPoint / 3) * (3 - index);
-    const y = top + ((bottom - top) / 3) * index;
-    return { value, y };
-  });
+  const yDomain: [number, number] = isPercent ? [0, 100] : [0, top];
+  const first = data.length > 0 ? data[0].t : 0;
+  const last = data.length > 0 ? data[data.length - 1].t : 1;
+  // A single shared timestamp needs visible width or it collapses to the axis.
+  const xDomain: ["dataMin", "dataMax"] | [number, number] =
+    first === last ? [first - 60_000, last + 60_000] : ["dataMin", "dataMax"];
+  const tickStyle = { fill: "hsl(var(--dim))", fontSize: 11 };
+
   return (
-    <div>
-      <svg
-        className="h-48 w-full"
-        viewBox={`0 0 ${width} ${height}`}
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={`${plotted.map((entry) => entry.name).join(" and ")} trend`}
-      >
-        <defs>
-          {plotted.map((entry) => (
-            <linearGradient
-              key={entry.key}
-              id={`${gid}-${entry.key}`}
-              x1="0"
-              y1="0"
-              x2="0"
-              y2="1"
-            >
-              <stop
-                offset="0%"
-                style={{ stopColor: entry.color, stopOpacity: 0.26 }}
-              />
-              <stop
-                offset="100%"
-                style={{ stopColor: entry.color, stopOpacity: 0 }}
-              />
-            </linearGradient>
-          ))}
-        </defs>
-        {ticks.map((tick) => (
-          <g key={tick.y}>
-            <line
-              x1="0"
-              x2={width}
-              y1={tick.y}
-              y2={tick.y}
-              strokeWidth="0.3"
-              style={{ stroke: "hsl(var(--line))" }}
-            />
-            <text
-              x={width}
-              y={tick.y - 1}
-              textAnchor="end"
-              fontSize="3.4"
-              fontFamily="Geist Mono, monospace"
-              style={{ fill: "hsl(var(--dim))" }}
-            >
-              {formatTickValue(tick.value, unit)}
-            </text>
-          </g>
-        ))}
-        {plotted.map((entry) => {
-          const lines = segmentsOf(entry);
-          if (!lines.length) return null;
-          const thresholdY =
-            entry.threshold === undefined
-              ? null
-              : bottom -
-                (entry.threshold / Math.max(maxPoint, entry.threshold)) *
-                  (bottom - top);
-          return (
-            <g key={entry.key}>
-              {lines.map((line, index) => (
-                <g key={`${entry.key}-${index}`}>
-                  <polygon
-                    points={`0,${bottom} ${line} ${width},${bottom}`}
-                    fill={`url(#${gid}-${entry.key})`}
-                  />
-                  <polyline
-                    points={line}
-                    fill="none"
-                    strokeWidth="0.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    vectorEffect="non-scaling-stroke"
-                    style={{ stroke: entry.color }}
-                  />
-                </g>
-              ))}
-              {thresholdY !== null && Number.isFinite(thresholdY) ? (
-                <line
+    <div
+      className="min-w-0"
+      role="region"
+      aria-label={`${plotted.map((entry) => entry.name).join(" and ")} trend`}
+    >
+      <div className="h-48 w-full min-w-0">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+          <AreaChart
+            accessibilityLayer
+            data={data}
+            margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+          >
+            <defs>
+              {plotted.map((entry) => (
+                <linearGradient
+                  key={entry.key}
+                  id={`${gradientId}-${entry.key}`}
                   x1="0"
-                  x2={width}
-                  y1={thresholdY}
-                  y2={thresholdY}
-                  strokeDasharray="2 1.5"
-                  strokeWidth="0.4"
-                  style={{ stroke: entry.color, opacity: 0.45 }}
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop
+                    offset="0%"
+                    style={{ stopColor: entry.color, stopOpacity: 0.26 }}
+                  />
+                  <stop
+                    offset="100%"
+                    style={{ stopColor: entry.color, stopOpacity: 0 }}
+                  />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid stroke="hsl(var(--line))" strokeDasharray="3 3" vertical={false} />
+            <XAxis
+              dataKey="t"
+              type="number"
+              scale="time"
+              domain={xDomain}
+              tickFormatter={(t: number) => `${formatChartTime(new Date(t).toISOString())}:${String(new Date(t).getSeconds()).padStart(2, "0")}`}
+              tick={tickStyle}
+              stroke="hsl(var(--line))"
+              minTickGap={24}
+            />
+            <YAxis
+              domain={yDomain}
+              tickFormatter={(value: number) => isPercent ? `${formatTickValue(value, unit)}%` : unit === "bytes/s" ? formatThroughput(value) : formatTickValue(value, unit)}
+              tick={tickStyle}
+              stroke="hsl(var(--line))"
+              width={isPercent ? 56 : 76}
+            />
+            <Tooltip
+              filterNull={false}
+              content={<TrendTooltip unit={unit} />}
+              cursor={{ stroke: "hsl(var(--dim))" }}
+            />
+            {plotted.map((entry) => (
+              <Area
+                key={entry.key}
+                type="linear"
+                dataKey={entry.key}
+                name={entry.name}
+                stroke={entry.color}
+                fill={`url(#${gradientId}-${entry.key})`}
+                strokeWidth={1.5}
+                dot={false}
+                activeDot={{ r: 3 }}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            ))}
+            {plotted.map((entry) =>
+              entry.threshold !== undefined && Number.isFinite(entry.threshold) ? (
+                <ReferenceLine
+                  key={`${entry.key}-threshold`}
+                  y={entry.threshold}
+                  stroke={entry.color}
+                  strokeDasharray="4 3"
+                  strokeOpacity={0.45}
                 />
-              ) : null}
-            </g>
-          );
-        })}
-        <line
-          x1="0"
-          x2={width}
-          y1={bottom}
-          y2={bottom}
-          strokeWidth="0.4"
-          style={{ stroke: "hsl(var(--line))" }}
-        />
-      </svg>
-      <div className="tnum mt-1 flex justify-between text-[10px] uppercase tracking-[0.08em] text-dim">
-        <span>{firstLabel || "—"}</span>
-        <span>{lastLabel}</span>
+              ) : null,
+            )}
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );

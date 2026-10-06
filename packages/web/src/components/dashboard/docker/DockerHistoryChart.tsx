@@ -1,19 +1,68 @@
+import { useId } from "react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import type { TooltipContentProps } from "recharts";
 import type { DockerHostSample, DockerMetricRollup } from "../../../lib/api";
 import { EmptyState } from "../shared/EmptyState";
+import { formatBytes } from "../servers/helpers";
 
-function metricAt(sample: DockerHostSample, key: string): number | undefined {
-  const value = sample.metrics[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+type HistoryPoint = { t: number; value: number | null };
+
+function pointsFor(samples: DockerHostSample[], key: string): HistoryPoint[] {
+  return samples
+    .map((sample) => {
+      const t = Date.parse(sample.effectiveAt);
+      return { sample, t: Number.isFinite(t) ? t : null };
+    })
+    .filter((entry): entry is { sample: DockerHostSample; t: number } => entry.t !== null)
+    .sort((a, b) => a.t - b.t)
+    .map(({ sample, t }) => {
+      const value = sample.metrics[key];
+      return {
+        t,
+        value: typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null,
+      };
+    });
 }
 
-function pointsFor(samples: DockerHostSample[], key: string) {
-  return [...samples]
-    .sort((a, b) => +new Date(a.effectiveAt) - +new Date(b.effectiveAt))
-    .map((s) => ({ at: s.effectiveAt, value: metricAt(s, key) }))
-    .filter((p): p is { at: string; value: number } => p.value !== undefined);
+function CpuTooltip({ active, payload, label }: TooltipContentProps) {
+  if (!active) return null;
+  const raw = payload?.[0]?.value;
+  return (
+    <div className="border border-line bg-raised px-2 py-1 text-[11px] text-text">
+      <p className="tnum text-dim">
+        {typeof label === "number" && Number.isFinite(label) ? new Date(label).toLocaleString() : "Unknown time"}
+      </p>
+      <p className="tnum mt-0.5">
+        {typeof raw === "number" && Number.isFinite(raw) ? `${raw.toFixed(1)}%` : "no data"}
+      </p>
+    </div>
+  );
 }
 
-/** Bounded host history sparkline (read-only SVG, no controls). */
+function MemoryTooltip({ active, payload, label }: TooltipContentProps) {
+  if (!active) return null;
+  const raw = payload?.[0]?.value;
+  return (
+    <div className="border border-line bg-raised px-2 py-1 text-[11px] text-text">
+      <p className="tnum text-dim">
+        {typeof label === "number" && Number.isFinite(label) ? new Date(label).toLocaleString() : "Unknown time"}
+      </p>
+      <p className="tnum mt-0.5">
+        {typeof raw === "number" && Number.isFinite(raw) ? (raw === 0 ? "0 B" : formatBytes(raw)) : "no data"}
+      </p>
+    </div>
+  );
+}
+
+/** Bounded host history charts (read-only Recharts, no controls). */
 export function DockerHistoryChart({
   samples,
   rollups,
@@ -27,6 +76,7 @@ export function DockerHistoryChart({
   loading: boolean;
   error?: string | null;
 }) {
+  const captionId = useId();
   if (loading) {
     return (
       <section aria-label="Docker history" aria-busy="true" className="border border-line bg-panel p-4">
@@ -44,12 +94,14 @@ export function DockerHistoryChart({
   }
   const cpu = pointsFor(samples, "cpuPercent");
   const mem = pointsFor(samples, "memoryUsageBytes");
-  const ordered = [...samples].sort((a, b) => +new Date(a.effectiveAt) - +new Date(b.effectiveAt));
-  const first = ordered[0];
-  const last = ordered[ordered.length - 1];
+  const cpuValid = cpu.filter((p) => p.value !== null).length;
+  const memValid = mem.filter((p) => p.value !== null).length;
+  const times = [...cpu.map((p) => p.t), ...mem.map((p) => p.t)].sort((a, b) => a - b);
+  const first = times.length > 0 ? times[0] : undefined;
+  const last = times.length > 0 ? times[times.length - 1] : undefined;
   const partial = samples.filter((sample) => sample.coverage && !sample.coverage.complete).length;
   const gaps = samples.filter((sample) => sample.coverage && sample.coverage.detailsSampled < sample.coverage.detailsTotalEligible).length;
-  if (cpu.length === 0 && mem.length === 0) {
+  if (cpuValid === 0 && memValid === 0) {
     return (
       <section aria-label="Docker history" className="border border-line bg-panel">
         <header className="border-b border-line px-4 py-3">
@@ -64,24 +116,19 @@ export function DockerHistoryChart({
     );
   }
 
-  const spark = (points: { at: string; value: number }[], label: string) => {
-    if (points.length === 0) return <p className="text-[11px] text-dim">No {label} points retained.</p>;
-    const max = Math.max(...points.map((p) => p.value), 1);
-    const w = 220;
-    const h = 44;
-    const step = points.length > 1 ? w / (points.length - 1) : 0;
-    const d = points
-      .map((p, i) => `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)},${(h - 4 - (p.value / max) * (h - 10)).toFixed(1)}`)
-      .join(" ");
-    return (
-      <figure>
-        <figcaption className="text-[11px] text-dim">{label}</figcaption>
-        <svg viewBox={`0 0 ${w} ${h}`} className="mt-1 h-11 w-full" role="img" aria-label={`${label} history sparkline`}>
-          <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-info" />
-        </svg>
-      </figure>
-    );
+  const xDomainFor = (points: HistoryPoint[]): [string | number, string | number] => {
+    if (points.length === 0) return ["dataMin", "dataMax"];
+    const ts = points.map((p) => p.t);
+    const min = Math.min(...ts);
+    const max = Math.max(...ts);
+    if (min === max) return [min - 60_000, max + 60_000];
+    return ["dataMin", "dataMax"];
   };
+  const cpuMax = Math.max(...cpu.map((p) => (p.value === null ? Number.NEGATIVE_INFINITY : p.value)), 0);
+  const memMax = Math.max(...mem.map((p) => (p.value === null ? Number.NEGATIVE_INFINITY : p.value)), 0);
+  const cpuYDomain: [string | number, string | number] = cpuMax <= 0 ? [0, 1] : [0, "dataMax"];
+  const memYDomain: [string | number, string | number] = memMax <= 0 ? [0, 1] : [0, "dataMax"];
+  const tickStyle = { fill: "hsl(var(--dim))", fontSize: 11 };
 
   return (
     <section aria-label="Docker history" className="border border-line bg-panel">
@@ -90,18 +137,126 @@ export function DockerHistoryChart({
         <p className="mt-0.5 text-[12px] text-dim">Raw host samples; {rollups?.length ?? 0} hourly rollups available for longer-range context.</p>
       </header>
       <div className="space-y-2 p-4">
-      <p className="text-[12px] text-dim">
-        showing {samples.length} loaded raw host samples
-      </p>
-      <p className="tnum text-[11px] text-dim">
-        {first && last ? `${new Date(first.effectiveAt).toLocaleString()} – ${new Date(last.effectiveAt).toLocaleString()}` : "No source range"}
-        {partial ? ` · ${partial} partial coverage` : ""}
-        {gaps ? ` · ${gaps} samples with reduced detail coverage` : ""}
-      </p>
-      <div className="grid gap-4 text-text sm:grid-cols-2">
-        {spark(cpu, "CPU %")}
-        {spark(mem, "Memory bytes")}
-      </div>
+        <p className="text-[12px] text-dim">showing {samples.length} loaded raw host samples</p>
+        <p className="tnum text-[11px] text-dim">
+          {first !== undefined && last !== undefined
+            ? `${new Date(first).toLocaleString()} – ${new Date(last).toLocaleString()}`
+            : "No source range"}
+          {partial ? ` · ${partial} partial coverage` : ""}
+          {gaps ? ` · ${gaps} samples with reduced detail coverage` : ""}
+        </p>
+        <div className="grid min-w-0 gap-4 text-text sm:grid-cols-2">
+          <figure aria-labelledby={`${captionId}-cpu`} className="min-w-0">
+            <figcaption id={`${captionId}-cpu`} className="text-[11px] text-dim">
+              CPU (%) · aggregate can exceed 100%
+            </figcaption>
+            {cpuValid === 0 ? (
+              <p className="mt-1 text-[11px] text-dim">No CPU % points retained.</p>
+            ) : (
+              <>
+                <div className="mt-1 h-44 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                    <LineChart accessibilityLayer data={cpu} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                      <CartesianGrid stroke="hsl(var(--line))" strokeDasharray="3 3" vertical={false} />
+                      <XAxis
+                        dataKey="t"
+                        type="number"
+                        scale="time"
+                        domain={xDomainFor(cpu)}
+                        tickFormatter={(t: number) =>
+                          new Date(t).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })
+                        }
+                        tick={tickStyle}
+                        stroke="hsl(var(--line))"
+                        minTickGap={24}
+                      />
+                      <YAxis
+                        domain={cpuYDomain}
+                        tickFormatter={(v: number) => `${v}%`}
+                        tick={tickStyle}
+                        stroke="hsl(var(--line))"
+                        width={52}
+                      />
+                      <Tooltip content={(props) => <CpuTooltip {...props} />} cursor={{ stroke: "hsl(var(--dim))" }} />
+                      <Line
+                        type="linear"
+                        dataKey="value"
+                        stroke="hsl(var(--telemetry-cpu))"
+                        strokeWidth={1.5}
+                        dot={cpuValid === 1 ? { r: 3, fill: "hsl(var(--telemetry-cpu))" } : false}
+                        activeDot={{ r: 3 }}
+                        connectNulls={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                {cpuValid === 1 ? (
+                  <p className="mt-1 text-[11px] text-dim">Not enough history yet — showing the single retained sample.</p>
+                ) : null}
+              </>
+            )}
+          </figure>
+          <figure aria-labelledby={`${captionId}-memory`} className="min-w-0">
+            <figcaption id={`${captionId}-memory`} className="text-[11px] text-dim">
+              Memory (bytes)
+            </figcaption>
+            {memValid === 0 ? (
+              <p className="mt-1 text-[11px] text-dim">No Memory bytes points retained.</p>
+            ) : (
+              <>
+                <div className="mt-1 h-44 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                    <LineChart accessibilityLayer data={mem} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                      <CartesianGrid stroke="hsl(var(--line))" strokeDasharray="3 3" vertical={false} />
+                      <XAxis
+                        dataKey="t"
+                        type="number"
+                        scale="time"
+                        domain={xDomainFor(mem)}
+                        tickFormatter={(t: number) =>
+                          new Date(t).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })
+                        }
+                        tick={tickStyle}
+                        stroke="hsl(var(--line))"
+                        minTickGap={24}
+                      />
+                      <YAxis
+                        domain={memYDomain}
+                        tickFormatter={(v: number) => (v === 0 ? "0 B" : formatBytes(v))}
+                        tick={tickStyle}
+                        stroke="hsl(var(--line))"
+                        width={64}
+                      />
+                      <Tooltip content={(props) => <MemoryTooltip {...props} />} cursor={{ stroke: "hsl(var(--dim))" }} />
+                      <Line
+                        type="linear"
+                        dataKey="value"
+                        stroke="hsl(var(--telemetry-memory))"
+                        strokeWidth={1.5}
+                        dot={memValid === 1 ? { r: 3, fill: "hsl(var(--telemetry-memory))" } : false}
+                        activeDot={{ r: 3 }}
+                        connectNulls={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                {memValid === 1 ? (
+                  <p className="mt-1 text-[11px] text-dim">Not enough history yet — showing the single retained sample.</p>
+                ) : null}
+              </>
+            )}
+          </figure>
+        </div>
       </div>
     </section>
   );

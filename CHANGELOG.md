@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Recharts telemetry charts
+
+- Replace custom SVG history charts for CPU/RAM, network RX/TX, and Docker CPU/memory with responsive Recharts components; resource meters remain unchanged.
+- Add unit-aware hover and keyboard tooltips, numeric timestamp axes, and readable percentage/throughput/memory labels using the existing dark telemetry palette.
+- Preserve missing samples as gaps and real zero values; retain empty/loading/error states, Docker coverage metadata, and single-sample indicators.
+
 ## Unreleased — compact agent status
 
 - Reduce fleet cards to agent/access status, a short version, and one update badge; omit repeated labels, heartbeat text, commit hashes, and completed upgrade confirmations from compact card/table summaries.
