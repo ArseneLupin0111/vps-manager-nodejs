@@ -125,7 +125,7 @@ function authOk(mode: "demo" | "local" = "local", authRequired = true) {
   };
 }
 
-function renderApp(initialEntries = ["/"]) {
+function renderApp(initialEntries = ["/vps"]) {
   return render(
     <MemoryRouter initialEntries={initialEntries}>
       <App />
@@ -152,6 +152,28 @@ afterEach(() => {
 });
 
 describe("React dashboard", () => {
+  it("keeps the homepage public and checks authentication when opening the dashboard", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: { mode: "local", authenticated: false, authRequired: true },
+      }),
+    });
+    renderApp(["/"]);
+
+    expect(screen.queryByText("Unlock FlexServer")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const dashboardLink = screen.getAllByRole("link").find(
+      (link) => link.getAttribute("href") === "/vps",
+    );
+    expect(dashboardLink).toBeDefined();
+    await userEvent.click(dashboardLink!);
+
+    expect(await screen.findByText("Unlock FlexServer")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", expect.any(Object));
+    expect(eventSourceConstructorSpy).not.toHaveBeenCalled();
+  });
   it("calculates healthy and degraded fleet summaries from existing metrics", () => {
     const healthyServer = {
       id: "healthy", name: "healthy", displayName: "Healthy host", host: "host", port: 22, username: "root",
@@ -214,7 +236,6 @@ describe("React dashboard", () => {
 
     renderApp();
 
-    // Root redirects to /vps, header shows "Servers"
     expect(
       await screen.findByText(
         "No VPS servers yet. Add your first server to get started.",

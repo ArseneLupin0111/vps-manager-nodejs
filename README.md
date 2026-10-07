@@ -2,6 +2,8 @@
 
 A self-hosted dashboard for monitoring and managing VPS instances. The project includes a NestJS API, a React/Vite web interface, and an optional Go agent for host metrics. Demo mode uses simulated data, so you can explore the dashboard without a VPS or real SSH credentials.
 
+The public homepage at `/` introduces FlexServer by **Sondoan Technology**, with feature descriptions, deployment workflow, FAQs, and contact links to **contact@sondoan.dev**. Its console preview uses clearly labeled static sample data. Open `/vps` (or use the homepage dashboard button) to enter the application; local-mode authentication still protects the dashboard. The homepage does not require API access or start monitoring connections.
+
 > **License status:** This repository does not currently contain a `LICENSE` file. No license to use, modify, or distribute the source code has been granted. Contact the maintainer before using it beyond the permissions provided by GitHub's terms.
 
 ## Features

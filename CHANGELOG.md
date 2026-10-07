@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — SaaS landing page
+
+- Add a Vietnamese FlexServer landing page at `/` for Sondoan Technology, with a sample console, feature overview, deployment workflow, accessible FAQ and `contact@sondoan.dev` contact links.
+- Keep `/vps` behind the existing local-mode authentication; do not fetch dashboard data or start monitoring on the public homepage.
+- Add responsive desktop/mobile navigation, keyboard focus states, reduced-motion support and an authentication-boundary regression test.
+
 ## Unreleased — proxy address security patch
 
 - Override and lock `proxy-addr` to 2.0.8 for Express consumers, fixing CVE-2026-90711 / GHSA-jqcg-44mw-7w3h (client-IP spoofing through short IPv4-mapped IPv6 trust prefixes).

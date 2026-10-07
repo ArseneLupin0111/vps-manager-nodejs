@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import { DashboardProvider } from "./context/DashboardContext";
 import {
   VpsWorkspaceAuditPage,
@@ -19,6 +19,7 @@ import {
 } from "./pages/Pages";
 import { AuthLoadingScreen, LoginGate } from "./components/auth/LoginGate";
 import { getAuthStatus, loginWithDashboardPassword } from "./lib/api";
+import { LandingPage } from "./pages/Landing";
 
 // ── Auth state type ─────────────────────────────────────────────────
 
@@ -30,6 +31,15 @@ type AuthState =
 // ── App ─────────────────────────────────────────────────────────────
 
 export function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="*" element={<DashboardApp />} />
+    </Routes>
+  );
+}
+
+function DashboardApp() {
   const [authState, setAuthState] = useState<AuthState>({
     status: "checking",
   });
@@ -130,7 +140,6 @@ export function App() {
     >
       <Routes>
         <Route element={<DashboardLayout />}>
-          <Route index element={<Navigate to="/vps" replace />} />
           <Route path="/vps" element={<VpsListPage />} />
           <Route path="/vps/new" element={<VpsNewPage />} />
           <Route path="/vps/:vpsId" element={<VpsWorkspaceLayout />}>
