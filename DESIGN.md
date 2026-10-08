@@ -28,8 +28,15 @@ The dashboard follows `VPS Management Dashboard/src`: a compact dark operational
 Retain existing API-backed actions, dialogs, authentication, capability restrictions, and terminal lifecycle. Missing telemetry must be labeled unavailable; charts must not relabel CPU history as memory or network history. Docker monitoring remains a separate workspace tab.
 
 Keep keyboard focus visible and dialogs dismissible. Tables may scroll within their containers on narrow screens. Pulse indicators respect reduced motion; existing overlay transitions remain in the shared primitives.
+
 - Host health is independent of job outcomes and container counts. Recent failed jobs produce a notice linking to Jobs; non-running containers have a neutral count and Docker link, not an inferred failure. Stale Docker counts retain an explicit snapshot label.
 - Failed jobs display the percentage reached, reported failure reason and finish time when available. Progress bars appear only while jobs are running; absent worker/duration metadata is omitted. Existing log links remain available.
+
+### Public landing and access
+
+The landing at `/` reuses the charcoal/lime tokens but uses 16–17px reading text, 64–96px desktop section spacing and 40–56px mobile spacing. Keep the two-line hero and a static, labeled preview with server rows, resource readings, one chart and one task area. On mobile, content and CTAs precede the full-width preview; do not scale a desktop console down.
+
+Use five benefit groups, a short startup workflow, explicit demo/local explanation, native keyboard-operable FAQ disclosures, then deployment actions. `/vps` is the existing mode-aware authentication boundary, not a public-demo promise. Vietnamese access states must retain session authentication, non-sensitive errors and a home link. Preserve visible focus, a focusable skip target, sticky-header anchor clearance and reduced-motion support.
 
 ## Reusable components
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — landing clarity and Vietnamese access
+
+- Rework the charcoal/lime landing hero, readable static preview, five benefit groups, startup workflow, mode explanation, FAQ and deployment CTA.
+- Correct the public-demo promise: `/vps` retains local password protection; simulated demo requires a demo-mode deployment. Link deployment actions to the existing README instructions.
+- Localize dashboard access, loading and errors into Vietnamese, add a home link, and keep credentials/session behavior unchanged.
+- Improve mobile preview typography, keyboard focus, anchor offsets and responsive layouts without new dependencies. Keep authentication regressions behavioral instead of pinning incidental copy.
+
 ## Unreleased — SaaS landing page
 
 - Add a Vietnamese FlexServer landing page at `/` for Sondoan Technology, with a sample console, feature overview, deployment workflow, accessible FAQ and `contact@sondoan.dev` contact links.

@@ -1,34 +1,35 @@
 # Demo Guide
 
-## Start Demo Mode
+Demo is a deployment mode, not a separate public route. The published FlexServer instance may run in local mode and require a dashboard password; the landing page does not bypass that gate.
+
+## Start from source
+
+Use Node.js 22 and npm. Install and build from the repository root:
 
 ```bash
 npm ci
 npm run build
-APP_MODE=demo npm start
 ```
 
-Open `http://localhost:3000`.
-
-## What Recruiters Can Review
-
-- Demo banner proving no real SSH connections are used.
-- Overview health cards for total, healthy, warning, and running jobs.
-- Seeded servers: `edge-sgp-01`, `api-fra-02`, and `worker-sfo-01`.
-- Job lifecycle cards showing queued, running, and succeeded command jobs.
-- Metrics cards with fresh and stale telemetry states.
-- Audit timeline with dashboard, job, terminal, and blocked-host events.
-- Demo terminal with canned command output only.
-- Settings panel showing `APP_MODE=demo`, disabled real SSH, and local auth posture.
-
-## Docker Demo
+Set `APP_MODE=demo` in your environment or `.env`, keep `ENABLE_WEB_TERMINAL=false`, then run:
 
 ```bash
-docker compose up --build
+npm start
 ```
 
-Compose starts with safe demo defaults and writable volumes for JSON data and private key material.
+Open `http://localhost:3000/vps`. Demo does not require a dashboard password or real SSH credentials. For development, run the API and Vite commands in separate terminals as described in the [README](../README.md#try-it-locally-no-vps-required).
 
-## Scope Boundaries
+## What to explore
 
-The portfolio MVP intentionally does not include cloud-provider provisioning, Kubernetes, Redis, Postgres, Prometheus, arbitrary shell commands, or a real WebSocket terminal. Those are post-MVP roadmap items.
+- Simulated servers, resource readings and metric histories.
+- Simulated command jobs, progress and activity history.
+- Canned terminal output; no real SSH connections.
+- Docker monitoring requires agent snapshots and permissions for real infrastructure; the landing preview is static illustration, not live telemetry.
+
+## Docker Compose
+
+Set a strong `POSTGRES_PASSWORD` in `.env` and `APP_MODE=demo`, then run `docker compose up --build -d`. Compose uses PostgreSQL, runs migrations and stores data/private keys in volumes. `docker compose down` preserves volumes; `docker compose down -v` deletes them. See the [deployment instructions](../README.md#deploy-with-docker-compose).
+
+## Move to real infrastructure
+
+Use `APP_MODE=local`, configure the session secret and set the dashboard password before signing in. Add real VPS records, establish SSH key trust and configure agents as needed. Switching modes is not a data migration and does not turn simulated records into real servers; use separate data directories or storage for isolated exploration. PostgreSQL and an optional real web terminal are supported in the product, but real terminal access requires local-mode configuration. Read the [local-mode instructions](../README.md#run-in-local-mode) and [security model](security.md) first.

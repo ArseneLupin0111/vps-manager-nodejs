@@ -1,4 +1,5 @@
 import { type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Alert } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -7,8 +8,12 @@ import { Label } from "../ui/label";
 export function AuthLoadingScreen() {
   return (
     <main className="grid min-h-screen place-items-center bg-ink text-dim">
-      <div className="border border-line bg-panel px-6 py-5 text-[13px]">
-        Checking dashboard access...
+      <div
+        role="status"
+        aria-live="polite"
+        className="border border-line bg-panel px-6 py-5 text-base"
+      >
+        Đang kiểm tra quyền truy cập bảng điều khiển…
       </div>
     </main>
   );
@@ -29,49 +34,78 @@ export function LoginGate({
 }) {
   return (
     <main className="grid min-h-screen place-items-center bg-ink px-4 py-8 text-text">
-      <section className="w-full max-w-sm border border-line bg-panel p-6 sm:p-7">
+      <section
+        aria-labelledby="login-title"
+        className="w-full max-w-sm border border-line bg-panel p-6 sm:p-7"
+      >
         <div className="mb-5">
           <div className="flex items-center gap-2.5">
-            <span className="grid h-8 w-8 shrink-0 place-items-center border border-line bg-raised text-[11px] font-semibold text-signal">
+            <span
+              aria-hidden="true"
+              className="grid h-8 w-8 shrink-0 place-items-center border border-line bg-raised text-[11px] font-semibold text-signal"
+            >
               FS
             </span>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-dim">
-              Secure local console
-            </p>
+            <p className="text-sm font-semibold text-dim">FlexServer</p>
           </div>
-          <h1 className="mt-4 text-2xl font-semibold tracking-tight text-text">
-            Unlock FlexServer
+          <h1
+            id="login-title"
+            className="mt-4 text-2xl font-semibold tracking-tight text-text"
+          >
+            Đăng nhập FlexServer
           </h1>
-          <p className="mt-2 text-[13px] leading-6 text-dim">
-            Enter the dashboard password. The password is verified server-side
-            against the stored credential and is never stored in browser
-            storage.
+          <p
+            id="login-description"
+            className="mt-2 text-base leading-6 text-dim"
+          >
+            Nhập mật khẩu để truy cập bảng điều khiển.
           </p>
         </div>
-        <form className="grid gap-4" onSubmit={onSubmit}>
+        <form
+          className="grid gap-4"
+          onSubmit={onSubmit}
+          aria-busy={busy}
+        >
           <div className="grid gap-2">
-            <Label htmlFor="dashboard-password" className="text-text">
-              Dashboard password
+            <Label htmlFor="dashboard-password" className="text-base text-text">
+              Mật khẩu
             </Label>
             <Input
               id="dashboard-password"
               type="password"
               autoComplete="current-password"
+              className="h-11 text-base"
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
-              placeholder="Enter password"
+              placeholder="Nhập mật khẩu"
               autoFocus
+              aria-invalid={message ? true : undefined}
+              aria-describedby={
+                message ? "login-description login-error" : "login-description"
+              }
             />
           </div>
           {message ? (
-            <Alert variant="destructive" className="px-3 py-2 text-sm">
+            <Alert
+              id="login-error"
+              variant="destructive"
+              className="px-3 py-2 text-sm"
+            >
               {message}
             </Alert>
           ) : null}
-          <Button type="submit" disabled={busy} className="h-10 w-full">
-            {busy ? "Verifying..." : "Enter dashboard"}
+          <Button type="submit" disabled={busy} className="h-11 w-full text-base">
+            {busy ? "Đang xác minh…" : "Đăng nhập"}
           </Button>
         </form>
+        <p className="mt-5 text-center text-base">
+          <Link
+            to="/"
+            className="inline-flex min-h-11 items-center text-dim underline underline-offset-4 transition-colors hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+          >
+            ← Về trang chủ
+          </Link>
+        </p>
       </section>
     </main>
   );

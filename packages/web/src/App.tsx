@@ -39,6 +39,33 @@ export function App() {
   );
 }
 
+function toSafeAuthMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  const hint = error.message.toLowerCase();
+  if (hint.includes("invalid credentials")) {
+    return "Sai mật khẩu. Vui lòng kiểm tra lại và thử lại.";
+  }
+  if (hint.includes("too many login attempts") || hint.includes("429")) {
+    return "Quá nhiều lần thử. Vui lòng đợi vài phút rồi thử lại.";
+  }
+  if (
+    hint.includes("not configured") ||
+    hint.includes("503") ||
+    hint.includes("rate limiter unavailable")
+  ) {
+    return "Dịch vụ đăng nhập tạm thời không khả dụng. Vui lòng thử lại sau.";
+  }
+  if (
+    hint.includes("timed out") ||
+    hint.includes("connectivity") ||
+    hint.includes("failed to fetch") ||
+    hint.includes("network")
+  ) {
+    return "Không thể kết nối máy chủ. Vui lòng thử lại sau.";
+  }
+  return fallback;
+}
+
 function DashboardApp() {
   const [authState, setAuthState] = useState<AuthState>({
     status: "checking",
@@ -66,10 +93,10 @@ function DashboardApp() {
         setAuthState({
           status: "locked",
           mode: "local",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Unable to verify dashboard access.",
+          message: toSafeAuthMessage(
+            error,
+            "Không thể xác minh quyền truy cập. Vui lòng thử lại sau.",
+          ),
         });
       });
     return () => {
@@ -84,7 +111,7 @@ function DashboardApp() {
       setAuthState({
         status: "locked",
         mode: "local",
-        message: "Enter the dashboard password to continue.",
+        message: "Vui lòng nhập mật khẩu để tiếp tục.",
       });
       return;
     }
@@ -101,10 +128,10 @@ function DashboardApp() {
       setAuthState({
         status: "locked",
         mode: "local",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Login failed. Check the password and try again.",
+        message: toSafeAuthMessage(
+          error,
+          "Không thể đăng nhập. Vui lòng thử lại sau.",
+        ),
       });
     } finally {
       setLoginBusy(false);

@@ -162,7 +162,7 @@ describe("React dashboard", () => {
     });
     renderApp(["/"]);
 
-    expect(screen.queryByText("Unlock FlexServer")).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="password"]')).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
     const dashboardLink = screen.getAllByRole("link").find(
       (link) => link.getAttribute("href") === "/vps",
@@ -170,7 +170,7 @@ describe("React dashboard", () => {
     expect(dashboardLink).toBeDefined();
     await userEvent.click(dashboardLink!);
 
-    expect(await screen.findByText("Unlock FlexServer")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('input[type="password"]')).toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", expect.any(Object));
     expect(eventSourceConstructorSpy).not.toHaveBeenCalled();
   });
@@ -1704,12 +1704,8 @@ describe("React dashboard", () => {
       await userEvent.click(logoutButton);
 
       // After logout, should see the login gate (not the dashboard)
-      expect(await screen.findByText("Unlock FlexServer")).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          "Enter the dashboard password. The password is verified server-side against the stored credential and is never stored in browser storage.",
-        ),
-      ).toBeInTheDocument();
+      await waitFor(() => expect(document.querySelector('input[type="password"]')).toBeInTheDocument());
+      expect(screen.queryByRole("heading", { name: "web-01" })).not.toBeInTheDocument();
 
       // Verify logout API was called
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2053,7 +2049,7 @@ describe("React dashboard", () => {
       const logoutButton = await screen.findByText("Log out");
       await userEvent.click(logoutButton);
 
-      expect(await screen.findByText("Unlock FlexServer")).toBeInTheDocument();
+      await waitFor(() => expect(document.querySelector('input[type="password"]')).toBeInTheDocument());
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/auth/logout",
         expect.objectContaining({ method: "POST" }),
