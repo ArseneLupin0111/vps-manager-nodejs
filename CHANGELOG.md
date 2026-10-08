@@ -3,6 +3,7 @@
 ## Unreleased — FlexTechnology branding
 
 - Update the company name to FlexTechnology and the contact address to `contact@flexserver.tech` across the landing page and SEO metadata.
+- Add a direct GitHub repository link to the landing footer and point landing documentation/issue links to the current ArseneLupin0111 repository.
 
 ## Unreleased — landing clarity and Vietnamese access
 

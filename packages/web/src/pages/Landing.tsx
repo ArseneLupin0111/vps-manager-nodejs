@@ -26,11 +26,10 @@ const NAV_LINKS = [
 ];
 
 const CONTACT_EMAIL = "contact@flexserver.tech";
-const README_URL = "https://github.com/sondoan17/vps-manager-nodejs#readme";
-const DEPLOY_URL =
-  "https://github.com/sondoan17/vps-manager-nodejs#deploy-with-docker-compose";
-const SECURITY_URL =
-  "https://github.com/sondoan17/vps-manager-nodejs/blob/main/docs/security.md";
+const REPO_URL = "https://github.com/ArseneLupin0111/vps-manager-nodejs";
+const README_URL = `${REPO_URL}#readme`;
+const DEPLOY_URL = `${REPO_URL}#deploy-with-docker-compose`;
+const SECURITY_URL = `${REPO_URL}/blob/main/docs/security.md`;
 
 export function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -785,6 +784,14 @@ export function LandingPage() {
             <a className="landing-footer-link" href="#quy-trinh">
               Quy trình
             </a>
+            <a
+              className="landing-footer-link"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub repository ↗
+            </a>
           </nav>
           <nav className="landing-footer-col" aria-label="Hỗ trợ">
             <p className="landing-footer-heading">Hỗ trợ</p>
@@ -793,7 +800,7 @@ export function LandingPage() {
             </a>
             <a
               className="landing-footer-link"
-              href="https://github.com/sondoan17/vps-manager-nodejs/issues"
+              href={`${REPO_URL}/issues`}
               target="_blank"
               rel="noreferrer"
             >
