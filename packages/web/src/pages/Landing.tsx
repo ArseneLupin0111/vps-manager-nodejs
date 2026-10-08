@@ -1,28 +1,34 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   Activity,
-  ArrowRight,
   ArrowUpRight,
+  BookOpen,
+  Boxes,
   Check,
   ChevronDown,
   Container,
   Database,
+  Globe,
   History,
+  ListChecks,
   Menu,
+  Network,
   Server,
   ShieldCheck,
   TerminalSquare,
+  Users,
+  Workflow,
   X,
   Zap,
 } from "lucide-react";
 import "./landing.css";
 
 const NAV_LINKS = [
-  { href: "#tinh-nang", label: "Tính năng" },
-  { href: "#quy-trinh", label: "Quy trình" },
-  { href: "#che-do", label: "Chế độ sử dụng" },
-  { href: "#faq", label: "Câu hỏi" },
+  { href: "#features", label: "Features" },
+  { href: "#audience", label: "Who it's for" },
+  { href: "#architecture", label: "How it works" },
+  { href: "#deploy", label: "Deploy" },
+  { href: "#faq", label: "FAQ" },
 ];
 
 const CONTACT_EMAIL = "contact@flexserver.tech";
@@ -30,6 +36,9 @@ const REPO_URL = "https://github.com/ArseneLupin0111/vps-manager-nodejs";
 const README_URL = `${REPO_URL}#readme`;
 const DEPLOY_URL = `${REPO_URL}#deploy-with-docker-compose`;
 const SECURITY_URL = `${REPO_URL}/blob/main/docs/security.md`;
+const ISSUES_URL = `${REPO_URL}/issues`;
+const ARCHITECTURE_URL = `${REPO_URL}/blob/main/docs/architecture.md`;
+const DEMO_GUIDE_URL = `${REPO_URL}/blob/main/docs/demo.md`;
 
 export function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -50,9 +59,9 @@ export function LandingPage() {
   }, [menuOpen]);
 
   return (
-    <div className="landing-page" id="top">
-      <a className="landing-skip" href="#noi-dung-chinh">
-        Bỏ qua tới nội dung chính
+    <div className="landing-page" id="top" lang="en">
+      <a className="landing-skip" href="#main-content">
+        Skip to main content
       </a>
 
       <header className="landing-header">
@@ -61,7 +70,7 @@ export function LandingPage() {
             className="landing-brand"
             href="#top"
             onClick={() => setMenuOpen(false)}
-            aria-label="FlexServer — về đầu trang"
+            aria-label="FlexServer — back to top"
           >
             <span className="landing-brand-mark" aria-hidden="true">
               <Server size={18} strokeWidth={2.25} />
@@ -72,7 +81,7 @@ export function LandingPage() {
             </span>
           </a>
 
-          <nav className="landing-nav" aria-label="Điều hướng chính">
+          <nav className="landing-nav" aria-label="Primary">
             <ul className="landing-nav-links">
               {NAV_LINKS.map((link) => (
                 <li key={link.href}>
@@ -85,20 +94,22 @@ export function LandingPage() {
           </nav>
 
           <div className="landing-header-actions">
-            <Link
+            <a
               className="landing-btn landing-btn-primary landing-btn-small"
-              to="/vps"
+              href={DEPLOY_URL}
+              target="_blank"
+              rel="noreferrer"
             >
-              Mở bảng điều khiển
-              <ArrowRight size={15} aria-hidden="true" />
-            </Link>
+              Deployment docs
+              <ArrowUpRight size={15} aria-hidden="true" />
+            </a>
             <button
               type="button"
               className="landing-menu-button"
               aria-expanded={menuOpen}
               aria-controls="landing-mobile-menu"
               aria-label={
-                menuOpen ? "Đóng menu điều hướng" : "Mở menu điều hướng"
+                menuOpen ? "Close navigation menu" : "Open navigation menu"
               }
               onClick={() => setMenuOpen((open) => !open)}
             >
@@ -113,7 +124,7 @@ export function LandingPage() {
 
         {menuOpen ? (
           <div className="landing-mobile-panel" id="landing-mobile-menu">
-            <nav aria-label="Điều hướng di động">
+            <nav aria-label="Mobile">
               <ul className="landing-mobile-links">
                 {NAV_LINKS.map((link) => (
                   <li key={link.href}>
@@ -129,67 +140,87 @@ export function LandingPage() {
               </ul>
             </nav>
             <div className="landing-mobile-cta">
-              <Link
+              <a
                 className="landing-btn landing-btn-primary landing-btn-block"
-                to="/vps"
+                href={DEPLOY_URL}
+                target="_blank"
+                rel="noreferrer"
                 onClick={() => setMenuOpen(false)}
               >
-                Mở bảng điều khiển
-                <ArrowRight size={16} aria-hidden="true" />
-              </Link>
+                Deployment docs
+                <ArrowUpRight size={16} aria-hidden="true" />
+              </a>
+              <a
+                className="landing-btn landing-btn-secondary landing-btn-block"
+                href={REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setMenuOpen(false)}
+              >
+                GitHub repository
+                <ArrowUpRight size={16} aria-hidden="true" />
+              </a>
             </div>
           </div>
         ) : null}
       </header>
 
-      <main id="noi-dung-chinh" tabIndex={-1}>
+      <main id="main-content" tabIndex={-1}>
         <section className="landing-hero" aria-labelledby="landing-hero-title">
           <div className="landing-wrap landing-hero-grid">
             <div className="landing-hero-copy">
               <p className="landing-eyebrow">
                 <span className="landing-eyebrow-dot" aria-hidden="true" />
-                Bảng điều khiển VPS self-hosted
+                Self-hosted VPS operations dashboard
               </p>
               <h1 className="landing-hero-title" id="landing-hero-title">
-                <span className="landing-hero-line">Quản lý mọi VPS.</span>
+                <span className="landing-hero-line">Every VPS.</span>
                 <span className="landing-hero-line landing-hero-accent">
-                  Từ một dashboard.
+                  One operations view.
                 </span>
               </h1>
               <p className="landing-hero-sub">
-                Theo dõi tài nguyên, kiểm tra Docker và quản lý tác vụ SSH trên
-                nhiều máy chủ — trong một giao diện tập trung, tự triển khai
-                trên hạ tầng của bạn.
+                FlexServer by FlexTechnology brings server health, Docker
+                checks, SSH jobs, metrics history, and audit events into one
+                workspace that you deploy on your own infrastructure. No
+                hosted account, no third-party data store.
               </p>
               <div className="landing-hero-ctas">
-                <Link className="landing-btn landing-btn-primary" to="/vps">
-                  Mở bảng điều khiển
-                  <ArrowRight size={17} aria-hidden="true" />
-                </Link>
                 <a
-                  className="landing-btn landing-btn-secondary"
+                  className="landing-btn landing-btn-primary"
                   href={DEPLOY_URL}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Xem cách triển khai
+                  Read the deployment docs
+                  <ArrowUpRight size={17} aria-hidden="true" />
+                </a>
+                <a
+                  className="landing-btn landing-btn-secondary"
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Browse on GitHub
                 </a>
               </div>
               <p className="landing-hero-caveat">
-                Bảng điều khiển yêu cầu mật khẩu khi chạy ở chế độ local.
+                This page is informational only. There is no public demo here:
+                run your own deployment in demo mode to explore with simulated
+                data, or in local mode to manage real servers.
               </p>
-              <ul className="landing-hero-meta" aria-label="Điểm nổi bật">
+              <ul className="landing-hero-meta" aria-label="Highlights">
                 <li className="landing-hero-meta-item">
                   <Check size={15} aria-hidden="true" />
-                  Nhiều VPS trong một nơi
+                  Many servers in one place
                 </li>
                 <li className="landing-hero-meta-item">
                   <Check size={15} aria-hidden="true" />
-                  Theo dõi tài nguyên từng máy
+                  Per-host resource history
                 </li>
                 <li className="landing-hero-meta-item">
                   <Check size={15} aria-hidden="true" />
-                  Tự triển khai trên hạ tầng của bạn
+                  Deploys on your infrastructure
                 </li>
               </ul>
             </div>
@@ -208,20 +239,20 @@ export function LandingPage() {
                   className="landing-chrome-title"
                   id="landing-console-title"
                 >
-                  vps-prod-01 — Tổng quan
+                  vps-prod-01 — Overview
                 </span>
-                <span className="landing-sample-badge">Dữ liệu minh họa</span>
+                <span className="landing-sample-badge">Sample data</span>
               </div>
               <div className="landing-console-body">
                 <ul
                   className="landing-hosts"
-                  aria-label="Danh sách máy chủ mẫu"
+                  aria-label="Sample server list"
                 >
                   <li className="landing-host-row is-online">
                     <span className="landing-host-dot" aria-hidden="true" />
                     <span className="landing-host-name tnum">vps-prod-01</span>
                     <span className="landing-host-status">
-                      Đang hoạt động
+                      Online
                     </span>
                     <span className="landing-host-meta tnum">
                       CPU 38% · RAM 62%
@@ -232,7 +263,7 @@ export function LandingPage() {
                     <span className="landing-host-name tnum">
                       vps-staging-02
                     </span>
-                    <span className="landing-host-status">Số liệu cũ</span>
+                    <span className="landing-host-status">Stale data</span>
                     <span className="landing-host-meta tnum">
                       CPU 12% · RAM 34%
                     </span>
@@ -248,7 +279,7 @@ export function LandingPage() {
                     <div
                       className="landing-meter"
                       role="img"
-                      aria-label="CPU mẫu 38 phần trăm"
+                      aria-label="Sample CPU at 38 percent"
                     >
                       <span
                         className="landing-meter-fill is-cpu"
@@ -267,7 +298,7 @@ export function LandingPage() {
                     <div
                       className="landing-meter"
                       role="img"
-                      aria-label="RAM mẫu 62 phần trăm"
+                      aria-label="Sample memory at 62 percent"
                     >
                       <span
                         className="landing-meter-fill is-mem"
@@ -280,13 +311,13 @@ export function LandingPage() {
                   </div>
                   <div className="landing-metric">
                     <div className="landing-metric-head">
-                      <span className="landing-metric-label">Ổ đĩa</span>
+                      <span className="landing-metric-label">Disk</span>
                       <span className="landing-metric-value tnum">41%</span>
                     </div>
                     <div
                       className="landing-meter"
                       role="img"
-                      aria-label="Ổ đĩa mẫu 41 phần trăm"
+                      aria-label="Sample disk at 41 percent"
                     >
                       <span
                         className="landing-meter-fill is-disk"
@@ -301,13 +332,13 @@ export function LandingPage() {
                   <div className="landing-panel">
                     <p className="landing-panel-title">
                       <Activity size={15} aria-hidden="true" />
-                      Lịch sử CPU · 60 phút mẫu
+                      CPU history · 60 sample minutes
                     </p>
                     <svg
                       className="landing-chart"
                       viewBox="0 0 260 84"
                       role="img"
-                      aria-label="Biểu đồ minh họa tĩnh: CPU dao động trong 60 phút mẫu"
+                      aria-label="Static sample chart: CPU moves between 30 and 55 percent over 60 sample minutes"
                     >
                       <g aria-hidden="true">
                         <line
@@ -339,36 +370,37 @@ export function LandingPage() {
                     </svg>
                     <p className="landing-panel-meta">
                       <span className="landing-legend is-cpu">CPU</span>
-                      <span className="tnum">uptime 42 ngày</span>
+                      <span className="tnum">uptime 42 days</span>
                     </p>
                   </div>
                   <div className="landing-panel">
                     <p className="landing-panel-title">
                       <TerminalSquare size={15} aria-hidden="true" />
-                      Tác vụ mẫu gần đây
+                      Recent sample jobs
                     </p>
                     <ul className="landing-jobs">
                       <li className="landing-job-row">
                         <span className="landing-job-name tnum">
                           backup-nightly
                         </span>
-                        <span className="landing-pill is-ok">Thành công</span>
+                        <span className="landing-pill is-ok">Succeeded</span>
                       </li>
                       <li className="landing-job-row">
                         <span className="landing-job-name tnum">
                           deploy-api · 62%
                         </span>
-                        <span className="landing-pill is-run">Đang chạy</span>
+                        <span className="landing-pill is-run">Running</span>
                       </li>
                     </ul>
                     <p className="landing-panel-meta">
-                      6 vùng chứa Docker · 128 bản ghi mẫu
+                      6 Docker containers · 128 sample records
                     </p>
                   </div>
                 </div>
               </div>
               <figcaption className="landing-console-caption">
-                Minh họa bố cục với số liệu tĩnh.
+                Static layout illustration with sample numbers. It is not live
+                telemetry and never connects to your servers.
               </figcaption>
             </figure>
           </div>
@@ -376,20 +408,22 @@ export function LandingPage() {
 
         <section
           className="landing-section"
-          id="tinh-nang"
+          id="features"
           aria-labelledby="landing-features-title"
         >
           <div className="landing-wrap">
             <div className="landing-section-head">
-              <p className="landing-section-eyebrow">Tính năng</p>
+              <p className="landing-section-eyebrow">Features</p>
               <h2
                 className="landing-section-title"
                 id="landing-features-title"
               >
-                Một nơi cho việc vận hành VPS mỗi ngày
+                One place for everyday VPS operations
               </h2>
               <p className="landing-section-sub">
-                Những việc bạn làm được với bảng điều khiển.
+                Concrete capabilities you get after you deploy the dashboard on
+                your own infrastructure. Everything below describes the
+                dashboard you run — not a service hosted by FlexTechnology.
               </p>
             </div>
 
@@ -400,12 +434,14 @@ export function LandingPage() {
                 </span>
                 <div className="landing-feature-body">
                   <h3 className="landing-feature-title">
-                    Sức khỏe từng máy chủ
+                    Per-host health you can read at a glance
                   </h3>
                   <p className="landing-feature-desc">
-                    Theo dõi CPU, RAM, ổ đĩa, mạng và thời gian hoạt động của
-                    từng máy chủ. Thiếu số liệu thì hiển thị rõ, không tự điền
-                    giá trị.
+                    Track CPU, memory, disk, system load, network throughput,
+                    and uptime for every server. Bounded per-host history feeds
+                    the overview and metrics views, and missing samples render
+                    as explicit gaps or “unavailable” instead of invented
+                    values.
                   </p>
                 </div>
               </li>
@@ -415,18 +451,20 @@ export function LandingPage() {
                 </span>
                 <div className="landing-feature-body">
                   <h3 className="landing-feature-title">
-                    Docker trong mục riêng
+                    Docker checks in their own tab
                   </h3>
                   <p className="landing-feature-desc">
-                    Kiểm tra vùng chứa Docker tách khỏi tình trạng máy chủ. Cần
-                    cấp quyền cho agent mới xem được số liệu, chi tiết trong{" "}
+                    Container counts stay separate from host health, so a
+                    stopped container is never misread as a down server. Docker
+                    monitoring needs an agent snapshot and stays independent
+                    from management actions; see the{" "}
                     <a
                       className="landing-inline-link"
                       href={SECURITY_URL}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      tài liệu bảo mật
+                      security model
                     </a>
                     .
                   </p>
@@ -438,12 +476,14 @@ export function LandingPage() {
                 </span>
                 <div className="landing-feature-body">
                   <h3 className="landing-feature-title">
-                    SSH và tác vụ từ xa
+                    SSH keys, command jobs, and an optional terminal
                   </h3>
                   <p className="landing-feature-desc">
-                    Cấp phát và xác minh khóa SSH cho từng máy chủ, chỉ kết nối
-                    tới địa chỉ được cho phép. Chạy lệnh từ xa và theo dõi tiến
-                    độ cùng kết quả rõ ràng cho từng tác vụ.
+                    Provision and verify an SSH key per server, then run remote
+                    commands as tracked jobs with progress and results.
+                    Real SSH only targets allowed addresses with explicit host
+                    key trust; the web terminal ships disabled and needs
+                    local-mode configuration.
                   </p>
                 </div>
               </li>
@@ -453,11 +493,13 @@ export function LandingPage() {
                 </span>
                 <div className="landing-feature-body">
                   <h3 className="landing-feature-title">
-                    Lịch sử để đối chiếu
+                    History and audit trail for follow-up
                   </h3>
                   <p className="landing-feature-desc">
-                    Xem lại lịch sử số liệu và hoạt động đã ghi nhận để đối
-                    chiếu khi cần. Số liệu cũ luôn kèm nhãn thời điểm rõ ràng.
+                    Revisit retained CPU and memory samples, network RX/TX in
+                    bytes per second, job outcomes with failure reasons, and
+                    the audit log when you need to compare what changed.
+                    Stale data keeps an explicit timestamp label.
                   </p>
                 </div>
               </li>
@@ -467,12 +509,37 @@ export function LandingPage() {
                 </span>
                 <div className="landing-feature-body">
                   <h3 className="landing-feature-title">
-                    Tự triển khai, dữ liệu của bạn
+                    Your deployment, your data
                   </h3>
                   <p className="landing-feature-desc">
-                    Tự triển khai bảng điều khiển và chọn nơi lưu dữ liệu bằng
-                    JSON hoặc PostgreSQL. Đổi chế độ không tự chuyển dữ liệu
-                    demo thành dữ liệu máy chủ thật.
+                    Self-host the dashboard and keep data in JSON files or
+                    PostgreSQL (optional TimescaleDB). Switching modes never
+                    converts simulated demo records into real server data.
+                  </p>
+                </div>
+              </li>
+              <li className="landing-feature">
+                <span className="landing-feature-icon" aria-hidden="true">
+                  <ShieldCheck size={20} />
+                </span>
+                <div className="landing-feature-body">
+                  <h3 className="landing-feature-title">
+                    Guardrails are on by default
+                  </h3>
+                  <p className="landing-feature-desc">
+                    Demo mode disables real SSH, private-network targets are
+                    blocked unless explicitly allowed in local mode, and the
+                    systemd agent gets no Docker socket access unless you opt
+                    in. Read the{" "}
+                    <a
+                      className="landing-inline-link"
+                      href={SECURITY_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      security model
+                    </a>{" "}
+                    before opening SSH, terminal, or Docker access.
                   </p>
                 </div>
               </li>
@@ -482,20 +549,182 @@ export function LandingPage() {
 
         <section
           className="landing-section landing-section-alt"
-          id="quy-trinh"
+          id="audience"
+          aria-labelledby="landing-audience-title"
+        >
+          <div className="landing-wrap">
+            <div className="landing-section-head">
+              <p className="landing-section-eyebrow">Who it is for</p>
+              <h2
+                className="landing-section-title"
+                id="landing-audience-title"
+              >
+                Built for small teams running their own servers
+              </h2>
+              <p className="landing-section-sub">
+                FlexServer fits operators who already SSH into machines and
+                want one calm place to check health, jobs, and history —
+                without handing data to a third party.
+              </p>
+            </div>
+
+            <ul className="landing-features landing-audience">
+              <li className="landing-feature">
+                <span className="landing-feature-icon" aria-hidden="true">
+                  <Users size={20} />
+                </span>
+                <div className="landing-feature-body">
+                  <h3 className="landing-feature-title">
+                    Solo developers and small ops teams
+                  </h3>
+                  <p className="landing-feature-desc">
+                    Keep your Linux hosts visible in one workspace for daily
+                    health checks, tracked command jobs, and follow-up using
+                    metrics and audit history.
+                  </p>
+                </div>
+              </li>
+              <li className="landing-feature">
+                <span className="landing-feature-icon" aria-hidden="true">
+                  <Boxes size={20} />
+                </span>
+                <div className="landing-feature-body">
+                  <h3 className="landing-feature-title">
+                    Homelab and self-hosting users
+                  </h3>
+                  <p className="landing-feature-desc">
+                    Run the whole stack with Docker Compose or from source,
+                    keep data in local JSON files or Postgres volumes, and
+                    explore safely first with simulated demo data.
+                  </p>
+                </div>
+              </li>
+              <li className="landing-feature">
+                <span className="landing-feature-icon" aria-hidden="true">
+                  <Globe size={20} />
+                </span>
+                <div className="landing-feature-body">
+                  <h3 className="landing-feature-title">
+                    What it is not
+                  </h3>
+                  <p className="landing-feature-desc">
+                    Not a hosted monitoring SaaS, not an alerting or
+                    auto-scaling platform, and not a replacement for backups,
+                    firewalls, or access reviews. It shows what your servers
+                    report; your team still decides what to do.
+                  </p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section
+          className="landing-section"
+          id="architecture"
+          aria-labelledby="landing-arch-title"
+        >
+          <div className="landing-wrap">
+            <div className="landing-section-head">
+              <p className="landing-section-eyebrow">How it works</p>
+              <h2 className="landing-section-title" id="landing-arch-title">
+                Browser, API, storage, and agent
+              </h2>
+              <p className="landing-section-sub">
+                Four parts with clear responsibilities. Full component and
+                data-flow notes live in the{" "}
+                <a
+                  className="landing-inline-link"
+                  href={ARCHITECTURE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  architecture doc
+                </a>
+                .
+              </p>
+            </div>
+
+            <ol className="landing-workflow landing-arch">
+              <li className="landing-step">
+                <span className="landing-step-num tnum" aria-hidden="true">
+                  01
+                </span>
+                <h3 className="landing-step-title">
+                  <Network size={16} aria-hidden="true" /> Web workspace
+                </h3>
+                <p className="landing-step-desc">
+                  Vite + React views for servers, metrics, Docker, SSH, jobs,
+                  history, and settings. Static preview only — no live
+                  connections from this page.
+                </p>
+              </li>
+              <li className="landing-step">
+                <span className="landing-step-num tnum" aria-hidden="true">
+                  02
+                </span>
+                <h3 className="landing-step-title">
+                  <Workflow size={16} aria-hidden="true" /> API and jobs
+                </h3>
+                <p className="landing-step-desc">
+                  Express + NestJS API serves the dashboard, runs SSH command
+                  jobs over allow-listed targets, and records metrics, job,
+                  and audit history.
+                </p>
+              </li>
+              <li className="landing-step">
+                <span className="landing-step-num tnum" aria-hidden="true">
+                  03
+                </span>
+                <h3 className="landing-step-title">
+                  <Database size={16} aria-hidden="true" /> Your storage
+                </h3>
+                <p className="landing-step-desc">
+                  JSON files under your data directory by default, or
+                  PostgreSQL with optional TimescaleDB. Docker volumes keep
+                  database data and private keys on your host.
+                </p>
+              </li>
+              <li className="landing-step">
+                <span className="landing-step-num tnum" aria-hidden="true">
+                  04
+                </span>
+                <h3 className="landing-step-title">
+                  <ListChecks size={16} aria-hidden="true" /> Server agent
+                </h3>
+                <p className="landing-step-desc">
+                  Optional Go agent on each Linux host reports CPU, memory,
+                  disk, and Docker snapshots. Docker metrics stay opt-in;
+                  management actions remain separate and confirmed.
+                </p>
+              </li>
+            </ol>
+
+            <p className="landing-arch-flow" role="note">
+              Data flow: browser web {"→"} NestJS API {"→"} JSON or
+              PostgreSQL storage + SSH/agent collection. The API never opens
+              a Docker socket itself; only the on-host agent can read Docker,
+              and only when you enable it.
+            </p>
+          </div>
+        </section>
+
+        <section
+          className="landing-section landing-section-alt"
+          id="workflow"
           aria-labelledby="landing-workflow-title"
         >
           <div className="landing-wrap">
             <div className="landing-section-head">
-              <p className="landing-section-eyebrow">Quy trình</p>
+              <p className="landing-section-eyebrow">Workflow</p>
               <h2
                 className="landing-section-title"
                 id="landing-workflow-title"
               >
-                Từ máy mới tới vận hành ổn định
+                From a new machine to steady operations
               </h2>
               <p className="landing-section-sub">
-                Chi tiết lệnh và tùy chọn xem trong{" "}
+                Exact commands and options live in the{" "}
                 <a
                   className="landing-inline-link"
                   href={README_URL}
@@ -504,14 +733,14 @@ export function LandingPage() {
                 >
                   README
                 </a>{" "}
-                và{" "}
+                and the{" "}
                 <a
                   className="landing-inline-link"
                   href={SECURITY_URL}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  mô hình bảo mật
+                  security model
                 </a>
                 .
               </p>
@@ -522,9 +751,10 @@ export function LandingPage() {
                 <span className="landing-step-num tnum" aria-hidden="true">
                   01
                 </span>
-                <h3 className="landing-step-title">Cài đặt</h3>
+                <h3 className="landing-step-title">Install</h3>
                 <p className="landing-step-desc">
-                  Chạy từ mã nguồn, Docker Compose hoặc trình cài đặt Linux.
+                  Run from source, with Docker Compose, or with the Linux
+                  installer on amd64.
                 </p>
               </li>
               <li className="landing-step">
@@ -532,11 +762,11 @@ export function LandingPage() {
                   02
                 </span>
                 <h3 className="landing-step-title">
-                  Đặt mật khẩu và đăng nhập
+                  Set a password and sign in
                 </h3>
                 <p className="landing-step-desc">
-                  Bật chế độ local, đặt mật khẩu bảng điều khiển rồi đăng nhập
-                  để mở giao diện.
+                  Enable local mode, set the dashboard password, then sign in
+                  to open the workspace.
                 </p>
               </li>
               <li className="landing-step">
@@ -544,10 +774,11 @@ export function LandingPage() {
                   03
                 </span>
                 <h3 className="landing-step-title">
-                  Thêm máy chủ và tin cậy SSH
+                  Add servers and trust SSH
                 </h3>
                 <p className="landing-step-desc">
-                  Thêm từng máy chủ rồi xác minh khóa trước khi kết nối thật.
+                  Add each host, then provision or verify its SSH key with
+                  explicit host-key trust before real connections.
                 </p>
               </li>
               <li className="landing-step">
@@ -555,11 +786,11 @@ export function LandingPage() {
                   04
                 </span>
                 <h3 className="landing-step-title">
-                  Gắn agent để có số liệu
+                  Attach agents for metrics
                 </h3>
                 <p className="landing-step-desc">
-                  Gắn agent cho từng máy chủ để số liệu bắt đầu đổ về bảng
-                  điều khiển.
+                  Attach an agent per host to collect resource samples. Enable
+                  Docker permissions separately when you need container snapshots.
                 </p>
               </li>
             </ol>
@@ -568,61 +799,116 @@ export function LandingPage() {
 
         <section
           className="landing-section"
-          id="che-do"
+          id="deploy"
           aria-labelledby="landing-modes-title"
         >
           <div className="landing-wrap">
             <div className="landing-section-head">
-              <p className="landing-section-eyebrow">Chế độ sử dụng</p>
+              <p className="landing-section-eyebrow">Deploy</p>
               <h2 className="landing-section-title" id="landing-modes-title">
-                Demo tự chạy, local cho hạ tầng thật
+                Self-run demo, local mode for real infrastructure
               </h2>
               <p className="landing-section-sub">
-                Trang này không cung cấp demo công khai; bạn có thể tự chạy{" "}
-                <code className="tnum">APP_MODE=demo</code> theo hướng dẫn rồi
-                mở <code className="tnum">/vps</code> để trải nghiệm.
+                There is no public demo on this page. Run{" "}
+                <code className="tnum">APP_MODE=demo</code> yourself to explore
+                with simulated data, or choose local mode for real servers.
+                Deployment presets and commands are in the{" "}
+                <a
+                  className="landing-inline-link"
+                  href={DEPLOY_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  deployment docs
+                </a>
+                .
               </p>
             </div>
+
+            <ul className="landing-deploy-list" aria-label="Deployment options">
+              <li className="landing-deploy-item">
+                <BookOpen size={18} aria-hidden="true" />
+                <div>
+                  <h3>From source</h3>
+                  <p>
+                    Node 22 recommended. API on port 3001, web workspace on
+                    3000, JSON storage by default.
+                  </p>
+                </div>
+              </li>
+              <li className="landing-deploy-item">
+                <BookOpen size={18} aria-hidden="true" />
+                <div>
+                  <h3>Docker Compose</h3>
+                  <p>
+                    Postgres with optional TimescaleDB, migrate, API, and web
+                    services on loopback ports. Volumes keep database data and
+                    private keys on your host.
+                  </p>
+                </div>
+              </li>
+              <li className="landing-deploy-item">
+                <BookOpen size={18} aria-hidden="true" />
+                <div>
+                  <h3>Linux installer</h3>
+                  <p>
+                    For Linux amd64 hosts with systemd, sudo, and Docker when
+                    you want the agent alongside the dashboard.
+                  </p>
+                </div>
+              </li>
+            </ul>
 
             <div className="landing-modes">
               <article className="landing-mode landing-mode-demo">
                 <p className="landing-mode-title">
                   <Zap size={16} aria-hidden="true" />
-                  Chế độ demo
+                  Demo mode
                 </p>
                 <p className="landing-mode-code tnum">APP_MODE=demo</p>
                 <p className="landing-mode-desc">
-                  Bản mô phỏng đầy đủ máy chủ, số liệu, tác vụ và cửa sổ lệnh —
-                  mở <code className="tnum">/vps</code> là thấy ngay. Không cần
-                  máy chủ thật, không kết nối SSH thật, không cần đăng nhập.
+                  A full simulation of servers, metrics, jobs, and the command
+                  window for exploring the interface on your own machine. No
+                  real servers, no real SSH connections, no sign-in.
                 </p>
                 <p className="landing-mode-note">
-                  Phù hợp khám phá giao diện và chụp ảnh minh họa.
+                  Good for learning the layout and taking sample screenshots.
+                  See the{" "}
+                  <a
+                    className="landing-inline-link"
+                    href={DEMO_GUIDE_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    demo guide
+                  </a>
+                  .
                 </p>
               </article>
               <article className="landing-mode landing-mode-local">
                 <p className="landing-mode-title">
                   <ShieldCheck size={16} aria-hidden="true" />
-                  Chế độ local
+                  Local mode
                 </p>
                 <p className="landing-mode-code tnum">APP_MODE=local</p>
                 <p className="landing-mode-desc">
-                  Dữ liệu thật từ nơi lưu trữ và agent do bạn cấu hình, đăng
-                  nhập bằng mật khẩu bảng điều khiển. Kết nối SSH chịu kiểm
-                  soát, cửa sổ lệnh tắt mặc định và Docker không được cấp quyền
-                  mặc định.
+                  Real data from storage and agents you configure, protected
+                  by the dashboard password. SSH connections are controlled,
+                  the web terminal is off by default, and Docker gets no
+                  access by default.
                 </p>
                 <p className="landing-mode-note">
-                  Đọc{" "}
+                  Read the{" "}
                   <a
                     className="landing-inline-link"
                     href={SECURITY_URL}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    mô hình bảo mật
+                    security model
                   </a>{" "}
-                  trước khi mở truy cập.
+                  before opening access. Switching modes is not a migration:
+                  demo records never become production data.
                 </p>
               </article>
             </div>
@@ -636,56 +922,85 @@ export function LandingPage() {
         >
           <div className="landing-wrap landing-faq-wrap">
             <div className="landing-section-head">
-              <p className="landing-section-eyebrow">Câu hỏi thường gặp</p>
+              <p className="landing-section-eyebrow">FAQ</p>
               <h2 className="landing-section-title" id="landing-faq-title">
-                Hỏi nhanh, đáp gọn
+                Quick answers before you deploy
               </h2>
+              <p className="landing-section-sub">
+                Still unsure? Open an{" "}
+                <a
+                  className="landing-inline-link"
+                  href={ISSUES_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  issue on GitHub
+                </a>{" "}
+                or mail{" "}
+                <a
+                  className="landing-inline-link"
+                  href={`mailto:${CONTACT_EMAIL}`}
+                >
+                  {CONTACT_EMAIL}
+                </a>
+                .
+              </p>
             </div>
 
             <div className="landing-faq">
               <details className="landing-faq-item">
                 <summary className="landing-faq-question">
-                  <span>Chưa có máy chủ thật thì dùng thử được không?</span>
+                  <span>Can I try it without a real server?</span>
                   <ChevronDown size={17} aria-hidden="true" />
                 </summary>
                 <p className="landing-faq-answer">
-                  Được. Bạn tự chạy{" "}
-                  <code className="tnum">APP_MODE=demo</code> trên máy của mình
-                  rồi mở <code className="tnum">/vps</code> để thấy bản mô
-                  phỏng. Không cần SSH hay thông tin đăng nhập nào.
+                  Yes. Run{" "}
+                  <code className="tnum">APP_MODE=demo</code> on your own
+                  machine to explore a full simulation of servers, metrics,
+                  jobs, and the command window. No SSH and no credentials are
+                  needed. See the{" "}
+                  <a
+                    className="landing-inline-link"
+                    href={DEMO_GUIDE_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    demo guide
+                  </a>
+                  .
                 </p>
               </details>
               <details className="landing-faq-item">
                 <summary className="landing-faq-question">
-                  <span>Trang này có demo công khai không?</span>
+                  <span>Is there a public demo on this page?</span>
                   <ChevronDown size={17} aria-hidden="true" />
                 </summary>
                 <p className="landing-faq-answer">
-                  Không. Trang này không cung cấp demo công khai; bạn có thể tự
-                  chạy <code className="tnum">APP_MODE=demo</code> theo hướng
-                  dẫn. Bản bạn tự triển khai ở chế độ local luôn yêu cầu mật
-                  khẩu.
+                  No. This page offers no public demo and links only to docs
+                  and source. Your own local deployment always requires the
+                  dashboard password.
                 </p>
               </details>
               <details className="landing-faq-item">
                 <summary className="landing-faq-question">
-                  <span>Dữ liệu của tôi được lưu ở đâu?</span>
+                  <span>Where does my data live?</span>
                   <ChevronDown size={17} aria-hidden="true" />
                 </summary>
                 <p className="landing-faq-answer">
-                  Ngay trên máy chủ đã cấu hình của bạn, bằng JSON hoặc
-                  PostgreSQL theo cấu hình triển khai. Docker Compose lưu dữ
-                  liệu trong các volume trên hạ tầng của bạn.
+                  On infrastructure you configure, as JSON files or in
+                  PostgreSQL depending on the deployment. With Docker Compose,
+                  data stays in volumes on your host.
                 </p>
               </details>
               <details className="landing-faq-item">
                 <summary className="landing-faq-question">
-                  <span>Cài đặt có những cách nào?</span>
+                  <span>What are the install options?</span>
                   <ChevronDown size={17} aria-hidden="true" />
                 </summary>
                 <p className="landing-faq-answer">
-                  Ba cách: chạy từ mã nguồn, dựng bằng Docker Compose, hoặc
-                  trình cài đặt Linux cho amd64. Chi tiết từng lệnh xem trong{" "}
+                  Three ways: run from source, compose the Postgres/API/web
+                  stack, or use the Linux installer for amd64. Each command is
+                  in the{" "}
                   <a
                     className="landing-inline-link"
                     href={README_URL}
@@ -699,23 +1014,45 @@ export function LandingPage() {
               </details>
               <details className="landing-faq-item">
                 <summary className="landing-faq-question">
-                  <span>Kết nối tới máy chủ của tôi thế nào?</span>
+                  <span>How does it connect to my servers?</span>
                   <ChevronDown size={17} aria-hidden="true" />
                 </summary>
                 <p className="landing-faq-answer">
-                  Thêm máy chủ từ bảng điều khiển, sau đó cấp phát hoặc xác
-                  minh khóa SSH. Kết nối thật chỉ tới địa chỉ được cho phép và
-                  cần tin cậy khóa máy chủ một cách tường minh; dải mạng riêng
-                  bị chặn mặc định. Xem thêm{" "}
+                  Add each server from the dashboard, then provision or verify
+                  its SSH key. Real connections only go to allowed addresses
+                  with explicit host-key trust, and private ranges stay
+                  blocked by default. Details are in the{" "}
                   <a
                     className="landing-inline-link"
                     href={SECURITY_URL}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    mô hình bảo mật
+                    security model
                   </a>
                   .
+                </p>
+              </details>
+              <details className="landing-faq-item">
+                <summary className="landing-faq-question">
+                  <span>What about Docker and the web terminal?</span>
+                  <ChevronDown size={17} aria-hidden="true" />
+                </summary>
+                <p className="landing-faq-answer">
+                  Docker monitoring is opt-in through the on-host agent and is
+                  separate from management actions. The web terminal is
+                  disabled by default and needs explicit local-mode setup.
+                </p>
+              </details>
+              <details className="landing-faq-item">
+                <summary className="landing-faq-question">
+                  <span>Does switching modes migrate my data?</span>
+                  <ChevronDown size={17} aria-hidden="true" />
+                </summary>
+                <p className="landing-faq-answer">
+                  No. Switching between demo and local is not a migration path:
+                  simulated records never convert into production data. Pick
+                  the mode that matches what you want to manage.
                 </p>
               </details>
             </div>
@@ -724,18 +1061,19 @@ export function LandingPage() {
 
         <section
           className="landing-section"
-          id="lien-he"
+          id="contact"
           aria-labelledby="landing-contact-title"
         >
           <div className="landing-wrap">
             <div className="landing-contact-panel">
-              <p className="landing-section-eyebrow">Triển khai</p>
+              <p className="landing-section-eyebrow">Deploy</p>
               <h2 className="landing-contact-title" id="landing-contact-title">
-                Triển khai FlexServer trên hạ tầng của bạn
+                Deploy FlexServer on your infrastructure
               </h2>
               <p className="landing-contact-sub">
-                Hướng dẫn đầy đủ cách cài đặt, cấu hình và kết nối máy chủ nằm
-                trong README.
+                Full install, configuration, and server-connection steps are in
+                the README and deployment docs. Questions go to GitHub issues
+                or {CONTACT_EMAIL}.
               </p>
               <div className="landing-contact-actions">
                 <a
@@ -744,12 +1082,18 @@ export function LandingPage() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Xem hướng dẫn triển khai
+                  Read the deployment docs
                   <ArrowUpRight size={17} aria-hidden="true" />
                 </a>
-                <Link className="landing-btn landing-btn-secondary" to="/vps">
-                  Mở bảng điều khiển
-                </Link>
+                <a
+                  className="landing-btn landing-btn-secondary"
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Browse on GitHub
+                  <ArrowUpRight size={17} aria-hidden="true" />
+                </a>
               </div>
             </div>
           </div>
@@ -769,20 +1113,23 @@ export function LandingPage() {
               </span>
             </span>
             <p className="landing-footer-tagline">
-              Bảng điều khiển tự triển khai để quản lý nhiều máy chủ trong một
-              nơi — theo dõi tài nguyên, kiểm tra Docker và quản lý tác vụ SSH.
+              A self-hosted dashboard for many servers in one place — resource
+              tracking, Docker checks, and SSH jobs.
             </p>
           </div>
-          <nav className="landing-footer-col" aria-label="Sản phẩm">
-            <p className="landing-footer-heading">Sản phẩm</p>
-            <Link className="landing-footer-link" to="/vps">
-              Bảng điều khiển
-            </Link>
-            <a className="landing-footer-link" href="#tinh-nang">
-              Tính năng
+          <nav className="landing-footer-col" aria-label="Product">
+            <p className="landing-footer-heading">Product</p>
+            <a className="landing-footer-link" href="#features">
+              Features
             </a>
-            <a className="landing-footer-link" href="#quy-trinh">
-              Quy trình
+            <a className="landing-footer-link" href="#audience">
+              Who it is for
+            </a>
+            <a className="landing-footer-link" href="#architecture">
+              How it works
+            </a>
+            <a className="landing-footer-link" href="#deploy">
+              Deploy
             </a>
             <a
               className="landing-footer-link"
@@ -790,21 +1137,21 @@ export function LandingPage() {
               target="_blank"
               rel="noreferrer"
             >
-              GitHub repository ↗
+              GitHub repository
             </a>
           </nav>
-          <nav className="landing-footer-col" aria-label="Hỗ trợ">
-            <p className="landing-footer-heading">Hỗ trợ</p>
+          <nav className="landing-footer-col" aria-label="Support">
+            <p className="landing-footer-heading">Support</p>
             <a className="landing-footer-link" href="#faq">
-              Câu hỏi thường gặp
+              FAQ
             </a>
             <a
               className="landing-footer-link"
-              href={`${REPO_URL}/issues`}
+              href={ISSUES_URL}
               target="_blank"
               rel="noreferrer"
             >
-              Báo lỗi / góp ý
+              Report an issue
             </a>
             <a
               className="landing-footer-link"
@@ -815,7 +1162,7 @@ export function LandingPage() {
           </nav>
         </div>
         <div className="landing-wrap landing-footer-bottom">
-          <p>© 2026 FlexTechnology. FlexServer — quản lý VPS tập trung.</p>
+          <p>© 2026 FlexTechnology. FlexServer — centralized VPS operations.</p>
         </div>
       </footer>
     </div>

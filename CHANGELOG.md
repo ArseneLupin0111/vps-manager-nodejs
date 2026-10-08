@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — English landing with no dashboard entry
+
+- Rewrite the landing page fully in English with expanded coverage: capability groups, audience and non-goals, a web/API/storage/agent architecture and data-flow overview, startup workflow, deployment options with demo/local limits, pre-adoption FAQ, and deployment CTAs.
+- Remove every landing link to the dashboard: primary CTAs point to the deployment docs and secondary CTAs to the GitHub repository. Auth, API, and dashboard routes are unchanged.
+- Set the landing `lang` to English with English metadata, keep the black/lime identity and the labeled static sample preview, and preserve mobile navigation, sticky-header anchor offsets, and reduced-motion support.
+
 ## Unreleased — FlexTechnology branding
 
 - Update the company name to FlexTechnology and the contact address to `contact@flexserver.tech` across the landing page and SEO metadata.

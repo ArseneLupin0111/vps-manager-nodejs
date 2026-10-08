@@ -34,9 +34,9 @@ Keep keyboard focus visible and dialogs dismissible. Tables may scroll within th
 
 ### Public landing and access
 
-The landing at `/` reuses the charcoal/lime tokens but uses 16–17px reading text, 64–96px desktop section spacing and 40–56px mobile spacing. Keep the two-line hero and a static, labeled preview with server rows, resource readings, one chart and one task area. On mobile, content and CTAs precede the full-width preview; do not scale a desktop console down.
+The English landing at `/` reuses the charcoal/lime tokens but uses 16–17px reading text, 64–96px desktop section spacing and 40–56px mobile spacing. Keep the two-line hero and a static, labeled English preview with server rows, resource readings, one chart and one task area. On mobile, content and CTAs precede the full-width preview; do not scale a desktop console down.
 
-Use five benefit groups, a short startup workflow, explicit demo/local explanation, native keyboard-operable FAQ disclosures, then deployment actions. `/vps` is the existing mode-aware authentication boundary, not a public-demo promise. Vietnamese access states must retain session authentication, non-sensitive errors and a home link. Preserve visible focus, a focusable skip target, sticky-header anchor clearance and reduced-motion support.
+Use capability groups, an audience and non-goals block, a four-part architecture and data-flow overview, a short startup workflow, deployment options with explicit demo/local explanation, native keyboard-operable FAQ disclosures, then deployment actions. The landing offers no dashboard entry and no public demo: primary CTAs link to the deployment docs and secondary CTAs to the GitHub repository. Dashboard access states must retain session authentication and non-sensitive errors. Preserve visible focus, a focusable skip target, sticky-header anchor clearance and reduced-motion support.
 
 ## Reusable components
 

@@ -164,11 +164,11 @@ describe("React dashboard", () => {
 
     expect(document.querySelector('input[type="password"]')).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
-    const dashboardLink = screen.getAllByRole("link").find(
+    expect(screen.getAllByRole("link").some(
       (link) => link.getAttribute("href") === "/vps",
-    );
-    expect(dashboardLink).toBeDefined();
-    await userEvent.click(dashboardLink!);
+    )).toBe(false);
+    cleanup();
+    renderApp(["/vps"]);
 
     await waitFor(() => expect(document.querySelector('input[type="password"]')).toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", expect.any(Object));
