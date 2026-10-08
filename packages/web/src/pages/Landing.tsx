@@ -25,7 +25,7 @@ const NAV_LINKS = [
   { href: "#faq", label: "Câu hỏi" },
 ];
 
-const CONTACT_EMAIL = "contact@sondoan.dev";
+const CONTACT_EMAIL = "contact@flexserver.tech";
 const README_URL = "https://github.com/sondoan17/vps-manager-nodejs#readme";
 const DEPLOY_URL =
   "https://github.com/sondoan17/vps-manager-nodejs#deploy-with-docker-compose";
@@ -69,7 +69,7 @@ export function LandingPage() {
             </span>
             <span className="landing-brand-text">
               <span className="landing-brand-name">FlexServer</span>
-              <span className="landing-brand-sub">by Sondoan Technology</span>
+              <span className="landing-brand-sub">by FlexTechnology</span>
             </span>
           </a>
 
@@ -766,7 +766,7 @@ export function LandingPage() {
               </span>
               <span className="landing-brand-text">
                 <span className="landing-brand-name">FlexServer</span>
-                <span className="landing-brand-sub">by Sondoan Technology</span>
+                <span className="landing-brand-sub">by FlexTechnology</span>
               </span>
             </span>
             <p className="landing-footer-tagline">
@@ -808,7 +808,7 @@ export function LandingPage() {
           </nav>
         </div>
         <div className="landing-wrap landing-footer-bottom">
-          <p>© 2026 Sondoan Technology. FlexServer — quản lý VPS tập trung.</p>
+          <p>© 2026 FlexTechnology. FlexServer — quản lý VPS tập trung.</p>
         </div>
       </footer>
     </div>

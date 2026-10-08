@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — FlexTechnology branding
+
+- Update the company name to FlexTechnology and the contact address to `contact@flexserver.tech` across the landing page and SEO metadata.
+
 ## Unreleased — landing clarity and Vietnamese access
 
 - Rework the charcoal/lime landing hero, readable static preview, five benefit groups, startup workflow, mode explanation, FAQ and deployment CTA.
