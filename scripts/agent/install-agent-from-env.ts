@@ -16,7 +16,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { Client, type SFTPWrapper } from "ssh2";
 import { loadAppConfig } from "../../packages/api/src/config/app-config.js";
-import { resolveAgentBackendUrl } from "../../packages/api/src/agents/agent-installer.service.js";
+import { resolveAgentBackendUrl } from "../../packages/api/src/agents/agent-backend-url.js";
 import { createRepositories } from "../../packages/api/src/persistence/repositories/create-repositories.js";
 import { buildDockerStateProvisionCommand } from "../../packages/api/src/agents/agent-lifecycle-remote.js";
 

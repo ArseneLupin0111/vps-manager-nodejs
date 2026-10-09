@@ -18,6 +18,7 @@ import { JobRunnerService } from "../jobs/job-runner.service.js";
 import { JobService } from "../jobs/job.service.js";
 import { AgentLifecycleCoordinator } from "./agent-lifecycle-coordinator.js";
 import { buildDockerStateProvisionCommand } from "./agent-lifecycle-remote.js";
+import { resolveAgentBackendUrl } from "./agent-backend-url.js";
 import { sanitiseError } from "../jobs/job-runner.service.js";
 import {
   APP_CONFIG,
@@ -27,29 +28,6 @@ import {
 } from "../tokens.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
-
-/**
- * Resolve the backend URL that the agent should use to push metrics.
- * - If AGENT_PUBLIC_BASE_URL is configured, use it.
- * - If the request host is localhost/127.0.0.1/::1, fail — no silent localhost config.
- * - Otherwise, use request protocol + host.
- */
-export function resolveAgentBackendUrl(config: AppConfig): string {
-  if (!config.agentPublicBaseUrl) {
-    throw new BadRequestException(
-      "AGENT_PUBLIC_BASE_URL must be configured before installing the agent. Set it to a URL reachable from the target VPS.",
-    );
-  }
-
-  const url = new URL(config.agentPublicBaseUrl);
-  if (url.protocol === "http:" && !config.allowInsecureAgentHttp) {
-    throw new BadRequestException(
-      "AGENT_PUBLIC_BASE_URL must use HTTPS unless ALLOW_INSECURE_AGENT_HTTP=true is explicitly configured.",
-    );
-  }
-
-  return config.agentPublicBaseUrl;
-}
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;

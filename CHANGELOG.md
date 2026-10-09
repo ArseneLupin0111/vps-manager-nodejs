@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — agent installer CLI smoke fix
+
+- Move backend URL resolution into an undecorated shared module so the standalone agent installer can show `--help` from the repository root without loading NestJS services or requiring experimental decorator transforms. Preserve URL validation and API error behavior.
+
 ## Unreleased — compact VPS cards
 
 - Keep fleet grid identity to server name, health and OS alongside live resource indicators and existing controls. Move connection, hardware, host ID, provider/location, tags, notes and runtime metadata to the individual VPS Overview's system details; table view and stored data are unchanged.
