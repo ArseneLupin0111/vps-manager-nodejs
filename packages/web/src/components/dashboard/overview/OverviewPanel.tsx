@@ -145,7 +145,6 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
         <Kpi label="Host health" value={statusValue} sub="Host status only · excludes jobs and containers" tone={statusTone} />
         <div className="min-w-0">
           <Kpi label="Containers" value={containersValue} sub={docker?.available ? `Running / total${docker.freshness === "stale" ? " · stale snapshot" : ""}` : "Docker data unavailable"} tone={containersTone} />
-          {notRunning > 0 ? <Link to="docker" className="mt-1 inline-block text-[12px] text-dim underline underline-offset-4">{notRunning} not running · Review containers</Link> : null}
         </div>
         <Kpi label="Recent jobs" value={failedJobs ? `${failedJobs} failed` : `${runningJobs} running`} sub={failedJobs ? `${runningJobs} running · Review errors below` : "Background tasks · separate from host health"} tone={failedJobs ? "crit" : "ok"} />
       </section>
