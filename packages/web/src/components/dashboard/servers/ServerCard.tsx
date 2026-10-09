@@ -41,7 +41,6 @@ import {
   vpsDisplayName,
 } from "../../../lib/dashboard-formatters";
 import type { DashboardOverview, VpsRecord } from "../../../lib/api";
-import { DockerMetricsPanel } from "./DockerMetricsPanel";
 import { AgentLifecycleStatus, agentJobFor } from "./AgentLifecycleStatus";
 import { LocalAgentUpdate } from "./LocalAgentUpdate";
 
@@ -51,7 +50,6 @@ export function ServerCard({
   vps,
   metric,
   systemInfo,
-  dockerMetrics,
   jobs,
   busy,
   password,
@@ -63,7 +61,6 @@ export function ServerCard({
   onUpgradeAgent,
   onRestartAgent,
   onRotateAgent,
-  onToggleDockerMetrics,
   onDelete,
   mode,
   onEdit,
@@ -71,7 +68,6 @@ export function ServerCard({
   vps: VpsRecord;
   metric?: DashboardOverview["metrics"][number];
   systemInfo?: DashboardOverview["systemInfo"][number];
-  dockerMetrics?: DashboardOverview["dockerMetrics"][number];
   jobs: DashboardOverview["jobs"];
   busy: boolean;
   password: string;
@@ -83,7 +79,6 @@ export function ServerCard({
   onUpgradeAgent: (vps: VpsRecord) => void;
   onRestartAgent: (vps: VpsRecord) => void;
   onRotateAgent: (vps: VpsRecord) => void;
-  onToggleDockerMetrics: (vps: VpsRecord) => void;
   onDelete: (vps: VpsRecord) => void;
   mode: "demo" | "local";
   onEdit: (vps: VpsRecord) => void;
@@ -174,16 +169,6 @@ export function ServerCard({
             <span className="text-dim">Load</span>
             <span className="tnum text-dim">{metric ? metric.loadAverage : "n/a"}</span>
           </div>
-        </div>
-
-        {/* Docker box */}
-        <div className="min-w-0 border border-line bg-ink/40">
-          <DockerMetricsPanel
-            vps={vps}
-            dockerMetrics={dockerMetrics}
-            busy={busy}
-            onToggle={onToggleDockerMetrics}
-          />
         </div>
 
         {/* Actions footer */}

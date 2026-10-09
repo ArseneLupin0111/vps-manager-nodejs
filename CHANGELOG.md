@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — uniform fleet cards
+
+- Remove the Docker section and monitoring toggle from fleet grid cards so Docker availability no longer changes card layout. Docker monitoring remains available in the individual VPS Docker page; fleet summaries are unchanged.
+
 ## Unreleased — Linux server icon
 
 - Show a compact Linux penguin beside fleet card names when reported OS metadata identifies Linux; leave unknown and non-Linux systems unmarked.

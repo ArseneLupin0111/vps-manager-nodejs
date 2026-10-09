@@ -21,9 +21,6 @@ export function ServersPanel(props: ServersPanelProps) {
   const systemInfoById = new Map(
     (props.systemInfo ?? []).map((info) => [info.vpsId, info]),
   );
-  const dockerMetricsById = new Map(
-    (props.dockerMetrics ?? []).map((metric) => [metric.vpsId, metric]),
-  );
   return (
     <div className="grid min-w-0 gap-6">
       {/* Fleet heading */}
@@ -152,7 +149,6 @@ export function ServersPanel(props: ServersPanelProps) {
               vps={vps}
               metric={metricById.get(vps.id)}
               systemInfo={systemInfoById.get(vps.id)}
-              dockerMetrics={dockerMetricsById.get(vps.id)}
               jobs={props.jobs.filter((job) => job.vpsId === vps.id)}
               busy={props.busy}
               password={props.provisionPasswords[vps.id] || ""}
@@ -164,7 +160,6 @@ export function ServersPanel(props: ServersPanelProps) {
               onUpgradeAgent={props.onUpgradeAgent}
               onRestartAgent={props.onRestartAgent}
               onRotateAgent={props.onRotateAgent}
-              onToggleDockerMetrics={props.onToggleDockerMetrics}
               onDelete={props.onDelete}
               mode={props.mode}
               onEdit={setEditTarget}
