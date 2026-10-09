@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Linux server icon
+
+- Show a compact Linux penguin beside fleet card names when reported OS metadata identifies Linux; leave unknown and non-Linux systems unmarked.
+
 ## Unreleased — agent installer CLI smoke fix
 
 - Move backend URL resolution into an undecorated shared module so the standalone agent installer can show `--help` from the repository root without loading NestJS services or requiring experimental decorator transforms. Preserve URL validation and API error behavior.

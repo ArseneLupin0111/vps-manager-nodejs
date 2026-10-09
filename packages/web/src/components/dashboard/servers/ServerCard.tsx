@@ -105,6 +105,9 @@ export function ServerCard({
     systemInfo?.os?.name ||
     systemInfo?.os?.family ||
     "OS not reported";
+  const isLinux = /\b(linux|ubuntu|debian|rhel|red hat|centos|fedora|rocky|alma ?linux|alpine|arch|manjaro|opensuse|suse|amazon linux|oracle linux)\b/i.test(
+    `${systemInfo?.os?.family ?? ""} ${systemInfo?.os?.name ?? ""} ${systemInfo?.os?.prettyName ?? ""}`,
+  );
   const agentJob = agentJobFor(vps, jobs);
   const agentActionRunning = Boolean(
     agentJob && (agentJob.status === "queued" || agentJob.status === "running"),
@@ -141,8 +144,19 @@ export function ServerCard({
         {/* Compact identity; full metadata lives in the VPS overview. */}
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <h3 className="min-w-0 break-words text-lg font-semibold leading-tight tracking-[-0.02em] text-text">
-              {displayName}
+            <h3 className="flex min-w-0 items-center gap-2 text-lg font-semibold leading-tight tracking-[-0.02em] text-text">
+              {isLinux ? (
+                <svg viewBox="0 0 24 24" width="22" height="22" className="shrink-0" role="img" aria-label="Linux">
+                  <path fill="currentColor" d="M12 2c-3 0-4 2.5-4 5.5v2L5 16c-.8 2 .6 4 3 4h8c2.4 0 3.8-2 3-4l-3-6.5v-2C16 4.5 15 2 12 2Z" />
+                  <ellipse cx="12" cy="14.5" rx="4" ry="5" fill="#f4f4f5" />
+                  <ellipse cx="10.5" cy="7" rx="1.2" ry="1.7" fill="#f4f4f5" />
+                  <ellipse cx="13.5" cy="7" rx="1.2" ry="1.7" fill="#f4f4f5" />
+                  <circle cx="10.7" cy="7.2" r=".55" fill="#18181b" />
+                  <circle cx="13.3" cy="7.2" r=".55" fill="#18181b" />
+                  <path fill="#fbbf24" d="m9 9 3-1 3 1-3 2Zm-2 9 4 2-1 2H4Zm10 0-4 2 1 2h6Z" />
+                </svg>
+              ) : null}
+              <span className="min-w-0 break-words">{displayName}</span>
             </h3>
             <ServerHealthStatus status={vps.status} />
           </div>
