@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — compact VPS cards
+
+- Keep fleet grid identity to server name, health and OS alongside live resource indicators and existing controls. Move connection, hardware, host ID, provider/location, tags, notes and runtime metadata to the individual VPS Overview's system details; table view and stored data are unchanged.
+
 ## Unreleased — agent backend URL cutover operations
 
 - Document `flexserverctl set-backend <URL> [--mode auto|systemd|user] [--dry-run]` plus `flexserverctl validate-url <URL> [--updater]` and `flexserverctl help` in the README install section and `docs/local-agent-upgrade-operations.md` as the way to repoint an **existing** agent, with an explicit cross-reference that rerunning `install.sh --backend-url` (or the standalone installers) only sets the public setting and the default for newly written configs and deliberately leaves an already-installed config untouched rather than resetting its backend URL. No credential rotation is part of a URL change, so `--rotate` is never suggested for it. `--mode auto` is the default (systemd when root with a root-owned install, else user when `~/.vps-manager-agent` exists, otherwise a hint to pass `--mode`), while `--mode systemd|user` remain the only explicit forms; systemd rewrites `backendUrl` and `apiBase` only when the updater config exists, user rewrites `~/.vps-manager-agent/config.json` only; reading root-owned configs may need `sudo`; `--dry-run` is the only safe preview (no write, no stop, no start, no backup file; `dry-run: no changes applied`, exit 0) and `validate-url` has zero side effects.

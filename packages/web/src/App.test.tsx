@@ -688,12 +688,6 @@ describe("React dashboard", () => {
 
     // Wait for server cards to be visible after data loads
     expect(await screen.findByRole("heading", { name: "edge-sgp-01" })).toBeInTheDocument();
-    expect(screen.getByText("Hetzner")).toBeInTheDocument();
-    expect(screen.getByText("Location not detected")).toBeInTheDocument();
-    expect(screen.getByText("Handles public ingress.")).toBeInTheDocument();
-    expect(
-      screen.getByText((content) => content.includes("edge, public")),
-    ).toBeInTheDocument();
     // Compact app bar breadcrumb navigation should be present (sidebar removed)
     expect(
       screen.getByRole("navigation", { name: "Dashboard context" }),
@@ -775,7 +769,6 @@ describe("React dashboard", () => {
 
     expect(await screen.findByRole("heading", { name: "Primary production" })).toBeInTheDocument();
     expect(screen.queryByText("prod-sgp-01")).not.toBeInTheDocument();
-    expect(screen.getByText("Primary node")).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Search servers"), "ovh");
     expect(screen.queryByText("prod-sgp-01")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "dev-fra-01" })).toBeInTheDocument();
@@ -1389,25 +1382,10 @@ describe("React dashboard", () => {
 
       renderApp(["/vps"]);
 
-      expect(await screen.findByText("127.0.0.1:22")).toBeInTheDocument();
-      expect(screen.getByText("Host ID: 3e6f37c57a5f")).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Friendly production" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Friendly production" })).toBeInTheDocument();
       expect(screen.queryByText("generated-name")).not.toBeInTheDocument();
-      const localCard = screen.getByRole("article", { name: "Server Local Server" });
-      const remoteCard = screen.getByRole("article", { name: "Server Friendly production" });
-      const localPrivacy = within(localCard).getByRole("button", { name: "Hide server address" });
-      const remotePrivacy = within(remoteCard).getByRole("button", { name: "Hide server address" });
-      expect(localPrivacy).toHaveAttribute("aria-pressed", "false");
-      expect(remotePrivacy).toHaveAttribute("title", "Hide server address");
-      await userEvent.click(localPrivacy);
-      expect(within(localCard).queryByText("127.0.0.1:22")).not.toBeInTheDocument();
-      expect(within(localCard).getByLabelText("Server address hidden")).toHaveTextContent("••••••••••••:••••");
-      expect(within(localCard).getByRole("button", { name: "Show server address" })).toHaveAttribute("aria-pressed", "true");
-      expect(within(remoteCard).getByText("198.51.100.40:22")).toBeInTheDocument();
-      await userEvent.click(remotePrivacy);
-      expect(within(remoteCard).queryByText("198.51.100.40:22")).not.toBeInTheDocument();
-      await userEvent.click(within(remoteCard).getByRole("button", { name: "Show server address" }));
-      expect(within(remoteCard).getByText("198.51.100.40:22")).toBeInTheDocument();
+      expect(screen.getByRole("article", { name: "Server Local Server" })).toBeInTheDocument();
+      expect(screen.getByRole("article", { name: "Server Friendly production" })).toBeInTheDocument();
       expect(screen.getAllByLabelText("Host status: Healthy")[0]).toHaveTextContent("Healthy");
       expect(screen.getByLabelText("Host status: Unknown")).toHaveAttribute("title", "Host status: Unknown");
       expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
@@ -1418,7 +1396,6 @@ describe("React dashboard", () => {
       expect(screen.getByText("Host status")).toBeInTheDocument();
       expect(screen.getAllByText("Agent").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Access").length).toBeGreaterThan(0);
-      expect(screen.queryByText("Host ID: 3e6f37c57a5f")).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Local Server" })).toHaveAttribute("title", "Host ID: 3e6f37c57a5f");
       expect(screen.getByLabelText("Host status: Unknown")).toBeInTheDocument();
     });
@@ -1444,7 +1421,6 @@ describe("React dashboard", () => {
       const card = await screen.findByRole("article", { name: "Server Stale agent host" });
       expect(within(card).getByText("Agent offline")).toBeInTheDocument();
       expect(within(card).queryByText("Agent online")).not.toBeInTheDocument();
-      expect(within(card).getByText(`Seen ${new Date(lastSeenAt).toLocaleString()}`)).toBeInTheDocument();
 
       await userEvent.click(screen.getByRole("button", { name: "Table view" }));
       const row = screen.getByRole("row", { name: "Server Stale agent host" });
@@ -2390,14 +2366,13 @@ describe("React dashboard", () => {
       expect(screen.queryByRole("heading", { name: "Edit server" })).not.toBeInTheDocument();
     });
 
-    it("displays detected location in card and table, falls back gracefully, and searches city or country", async () => {
+    it("keeps location search working and shows detected location in table with graceful fallback", async () => {
       const user = userEvent.setup();
       const undetected = { ...editableServer, id: "vps-edit-2", displayName: "Backup", city: undefined, country: undefined };
       queueInitialEditLoad([editableServer, undetected]);
       renderApp(["/vps"]);
 
-      expect(await screen.findByText("Singapore, Singapore")).toBeInTheDocument();
-      expect(screen.getByText("Location not detected")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Production API" })).toBeInTheDocument();
 
       await user.type(screen.getByLabelText("Search servers"), "singapore");
       expect(screen.getByRole("heading", { name: "Production API" })).toBeInTheDocument();
@@ -2408,6 +2383,23 @@ describe("React dashboard", () => {
       expect(screen.getByRole("columnheader", { name: "Location" })).toBeInTheDocument();
       expect(screen.getByText("Singapore, Singapore")).toBeInTheDocument();
       expect(screen.getByText("Location not detected")).toBeInTheDocument();
+    });
+
+    it("keeps cards compact and surfaces endpoint metadata in the per-VPS overview", async () => {
+      const user = userEvent.setup();
+      queueInitialEditLoad();
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [] }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [] }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [] }) });
+      renderApp(["/vps"]);
+
+      const card = await screen.findByRole("article", { name: "Server Production API" });
+      expect(within(card).queryByText("203.0.113.10:22")).not.toBeInTheDocument();
+
+      await user.click(within(card).getByRole("link", { name: "Manage Production API" }));
+      expect(await screen.findByText("203.0.113.10:22")).toBeInTheDocument();
+      expect(screen.getByText("vps-edit-1")).toBeInTheDocument();
     });
 
     it("keeps the dialog open and exposes the API error when saving fails", async () => {

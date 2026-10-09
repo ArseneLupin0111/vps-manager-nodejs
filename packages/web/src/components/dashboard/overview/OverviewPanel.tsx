@@ -2,6 +2,8 @@ import { Link } from "react-router-dom";
 import { Alert } from "../../ui/alert";
 import type { DashboardOverview } from "../../../lib/api";
 import { formatBytes } from "../servers/helpers";
+import { formatDate, vpsHostId } from "../../../lib/dashboard-formatters";
+import { formatUptime } from "../shared/formatUptime";
 import { AuditPanel } from "../audit/AuditPanel";
 import { JobsPanel } from "../jobs/JobsPanel";
 import { ResourceGauge } from "../shared/ResourceGauge";
@@ -130,6 +132,22 @@ export function OverviewPanel({ overview }: { overview: DashboardOverview }) {
         [server?.city, server?.country].filter(Boolean).join(", ") ||
         "Location not detected",
     },
+    ...(server ? [
+      { label: "SSH address", value: `${server.host}:${server.port}` },
+      { label: "SSH user", value: server.username },
+      { label: "Server ID", value: server.id },
+      { label: "Host ID", value: vpsHostId(server) || "Not reported" },
+      { label: "CPU cores", value: sysInfo?.cpu?.cores ? String(sysInfo.cpu.cores) : "Not reported" },
+      { label: "CPU model", value: sysInfo?.cpu?.model || "Not reported" },
+      { label: "RAM capacity", value: sysInfo?.memory?.totalBytes ? formatBytes(sysInfo.memory.totalBytes) : "Not reported" },
+      { label: "Disk capacity", value: sysInfo?.rootDisk?.totalBytes ? formatBytes(sysInfo.rootDisk.totalBytes) : "Not reported" },
+      { label: "Tags", value: server.tags?.join(", ") || "None" },
+      { label: "Notes", value: server.notes || "None" },
+      { label: "Last seen", value: formatDate(server.lastSeenAt) },
+      { label: "Agent version", value: sysInfo?.agentVersion || "Not reported" },
+      { label: "Uptime", value: metric ? formatUptime(metric.uptime) : "Not reported" },
+      { label: "Last check", value: formatDate(metric?.collectedAt) },
+    ] : []),
   ];
 
   return (

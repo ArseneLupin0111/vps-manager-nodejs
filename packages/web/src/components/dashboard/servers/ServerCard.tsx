@@ -3,17 +3,14 @@ import { Link } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
-  Clock3,
   DownloadCloud,
   Edit3,
   Eye,
   EyeOff,
   KeyRound,
-  MapPin,
   MoreHorizontal,
   RotateCw,
   Server,
-  ServerCog,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -42,11 +39,8 @@ import {
   freshnessLabel,
   serverStatusLabel,
   vpsDisplayName,
-  vpsHostId,
 } from "../../../lib/dashboard-formatters";
 import type { DashboardOverview, VpsRecord } from "../../../lib/api";
-import { formatUptime } from "../shared/formatUptime";
-import { formatBytes } from "./helpers";
 import { DockerMetricsPanel } from "./DockerMetricsPanel";
 import { AgentLifecycleStatus, agentJobFor } from "./AgentLifecycleStatus";
 import { LocalAgentUpdate } from "./LocalAgentUpdate";
@@ -98,7 +92,6 @@ export function ServerCard({
   const isReady = isLocalHost || Boolean(vps.keyProvisionedAt);
   const isDown = vps.status === "unreachable";
   const [showPassword, setShowPassword] = useState(false);
-  const [addressHidden, setAddressHidden] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<VpsRecord | null>(null);
@@ -107,36 +100,12 @@ export function ServerCard({
   const [restartTarget, setRestartTarget] = useState<VpsRecord | null>(null);
   const [rotateAgentTarget, setRotateAgentTarget] = useState<VpsRecord | null>(null);
   const displayName = vpsDisplayName(vps);
-  const hostId = vpsHostId(vps);
   const osLabel =
     systemInfo?.os?.prettyName ||
     systemInfo?.os?.name ||
     systemInfo?.os?.family ||
     "OS not reported";
-  const specsLabel = systemInfo
-    ? [
-        systemInfo.cpu?.cores ? `${systemInfo.cpu.cores} cores` : null,
-        systemInfo.memory?.totalBytes
-          ? `${formatBytes(systemInfo.memory.totalBytes)} RAM`
-          : null,
-        systemInfo.rootDisk?.totalBytes
-          ? `${formatBytes(systemInfo.rootDisk.totalBytes)} disk`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : null;
   const agentJob = agentJobFor(vps, jobs);
-  const systemFacts = systemInfo
-    ? [
-        [systemInfo.kernel?.release, systemInfo.kernel?.arch]
-          .filter(Boolean)
-          .join(" · ") || null,
-        systemInfo.cpu?.model || null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : null;
   const agentActionRunning = Boolean(
     agentJob && (agentJob.status === "queued" || agentJob.status === "running"),
   );
@@ -169,7 +138,7 @@ export function ServerCard({
       className={`min-w-0 overflow-hidden border bg-panel transition-colors ${isDown ? "border-crit/30" : "border-line hover:border-dim/60"}`}
     >
       <div className="grid min-w-0 gap-5 p-5">
-        {/* Identity: name → status → endpoint → os/location → specs */}
+        {/* Compact identity; full metadata lives in the VPS overview. */}
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h3 className="min-w-0 break-words text-lg font-semibold leading-tight tracking-[-0.02em] text-text">
@@ -177,46 +146,9 @@ export function ServerCard({
             </h3>
             <ServerHealthStatus status={vps.status} />
           </div>
-          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-[13px] leading-5 text-dim">
-            <span
-              className="tnum inline-block min-w-[12rem] font-mono"
-              aria-label={addressHidden ? "Server address hidden" : `Server address ${vps.host}:${vps.port}`}
-            >
-              {addressHidden ? "••••••••••••:••••" : `${vps.host}:${vps.port}`}
-            </span>
-            <button
-              type="button"
-              className="inline-grid h-7 w-7 shrink-0 place-items-center border border-line text-dim transition-colors hover:bg-raised hover:text-text focus-visible:outline-2 focus-visible:outline-signal"
-              aria-label={addressHidden ? "Show server address" : "Hide server address"}
-              aria-pressed={addressHidden}
-              title={addressHidden ? "Show server address" : "Hide server address"}
-              onClick={() => setAddressHidden((hidden) => !hidden)}
-            >
-              {addressHidden ? <Eye size={14} aria-hidden="true" /> : <EyeOff size={14} aria-hidden="true" />}
-            </button>
-          </div>
-          <p className="mt-1 truncate text-[12px] text-dim" title={osLabel}>
+          <p className="mt-2 break-words text-sm text-dim" title={osLabel}>
             {osLabel}
           </p>
-          <p className="mt-0.5 text-[12px] text-dim">
-            {specsLabel ?? "System info not reported yet."}
-          </p>
-          {systemFacts ? (
-            <p className="mt-0.5 truncate text-[11px] text-dim" title={systemFacts}>
-              {systemFacts}
-            </p>
-          ) : null}
-          {hostId ? (
-            <p className="mt-1 break-all font-mono text-[11px] text-dim">
-              Host ID: {hostId}
-            </p>
-          ) : null}
-          <ServerLocationMeta vps={vps} />
-          <ServerAnnotations vps={vps} />
-          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-dim">
-            <Clock3 size={13} aria-hidden="true" />
-            <span>Seen {formatDate(vps.lastSeenAt)}</span>
-          </div>
         </div>
 
         {/* Meters: 4px tonal bars */}
@@ -242,12 +174,6 @@ export function ServerCard({
 
         {/* Actions footer */}
         <div className="flex min-w-0 flex-col gap-3 border-t border-line pt-4 xl:flex-row xl:items-center xl:justify-between">
-          <ServerRuntimeMeta
-            vps={vps}
-            metric={metric}
-            systemInfo={systemInfo}
-            jobs={jobs}
-          />
           <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
           <Button asChild type="button" size="sm" variant="default">
             <Link
@@ -513,79 +439,6 @@ function ServerHealthStatus({ status }: { status?: VpsRecord["status"] }) {
   );
 }
 
-// ── ServerRuntimeMeta ────────────────────────────────────────────────
-
-function ServerRuntimeMeta({
-  vps,
-  metric,
-  systemInfo,
-  jobs,
-}: {
-  vps: VpsRecord;
-  metric?: DashboardOverview["metrics"][number];
-  systemInfo?: DashboardOverview["systemInfo"][number];
-  jobs: DashboardOverview["jobs"];
-}) {
-  const runningJobs = jobs.filter((job) => job.status === "running").length;
-  const parts = [
-    systemInfo?.agentVersion ? `Agent ${systemInfo.agentVersion}` : null,
-    metric ? `Uptime ${formatUptime(metric.uptime)}` : null,
-    metric ? `Last check ${freshnessLabel(metric.collectedAt)}` : null,
-    `${runningJobs} running job${runningJobs === 1 ? "" : "s"}`,
-  ].filter(Boolean);
-  return (
-    <div className="min-w-0 text-xs font-normal leading-5 text-dim">
-      <p className="whitespace-normal" title={parts.join(" / ")}>
-        {parts.join(" · ")}
-      </p>
-      <p
-        className="mt-0.5 break-all font-mono text-[10px] leading-4 text-dim"
-        title={`Server ID: ${vps.id} · SSH user: ${vps.username}`}
-      >
-        ID {vps.id} · SSH {vps.username}
-      </p>
-    </div>
-  );
-}
-
-// ── Compact metadata helpers ─────────────────────────────────────────
-
-function ServerLocationMeta({ vps }: { vps: VpsRecord }) {
-  const location = [vps.city, vps.country].filter(Boolean).join(", ") || "Location not detected";
-  return (
-    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-dim">
-      <span className="inline-flex min-w-0 items-center gap-1">
-        <ServerCog size={12} aria-hidden="true" />
-        <span className="truncate">{vps.provider || "Provider not set"}</span>
-      </span>
-      <span aria-hidden="true">·</span>
-      <span className="inline-flex min-w-0 items-center gap-1">
-        <MapPin size={12} aria-hidden="true" />
-        <span className="truncate" title={location}>{location}</span>
-      </span>
-    </div>
-  );
-}
-
-function ServerAnnotations({ vps }: { vps: VpsRecord }) {
-  return (
-    <>
-      {vps.tags?.length ? (
-        <p
-          className="mt-1.5 truncate text-[11px] text-dim"
-          title={`Tags: ${vps.tags.join(", ")}`}
-        >
-          Tags · {vps.tags.join(", ")}
-        </p>
-      ) : null}
-      {vps.notes ? (
-        <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-dim">
-          {vps.notes}
-        </p>
-      ) : null}
-    </>
-  );
-}
 
 function TelemetryMeter({ label, value }: { label: string; value?: number }) {
   const hasValue = typeof value === "number" && Number.isFinite(value);
