@@ -13,6 +13,12 @@
 #   --service-user <user> System user for the service (default: vps-manager-agent).
 #   --dry-run             Print what would be done without making changes.
 #   --uninstall           Stop, disable, and remove the agent.
+#   --install-cli         Also install the flexserverctl CLI (default: on).
+#   --skip-cli            Do not install the flexserverctl CLI.
+#   --cli-source <path>   Path to flexserverctl.py (default: sibling file,
+#                         else download from the pinned repository).
+#   --cli-dest <path>     CLI install path (default:
+#                         /usr/local/bin/flexserverctl).
 #   --help                Show this help.
 #
 # This script:
@@ -22,12 +28,92 @@
 #      dir 0750).
 #   4. Writes a hardened systemd unit file.
 #   5. Runs systemctl daemon-reload, enable, and start/restart.
+#   6. Installs flexserverctl.py to /usr/local/bin/flexserverctl (root:root 0755,
+#      atomic, syntax-checked first; requires python3) unless --skip-cli.
 #
-# On --uninstall: stops, disables, removes unit, binary, and config.
+# On --uninstall: stops, disables, removes unit, binary, config, and the CLI.
 # Does NOT remove the API app data (only agent runtime files).
 
 set -euo pipefail
 umask 077
+
+# ── Early flag scan ───────────────────────────────────────────────────────
+# Scanned before the bootstrap below so `--help` and `--dry-run` never touch
+# the network or the filesystem: a piped `--dry-run` must make zero writes,
+# including the library and CLI downloads.
+#
+# Scans without mutating positional parameters: a while/shift loop would
+# consume the argument list (e.g. --binary/--config values) before the main
+# option parser ever sees it, breaking every real invocation.
+DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    --help)
+      # Read the header only when genuinely running from a file: in pipe mode
+      # $0 can be the interpreter path (a binary), which would dump garbage.
+      installer_header=""
+      if [[ -r "$0" ]] && IFS= read -r installer_header < "$0" && [[ "$installer_header" == "#!"* ]]; then
+        sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
+      else
+        echo "Usage: sudo install-local-agent.sh --binary <path> --config <path> [options]"
+        echo "Run this script from a file (clone the repository) to see the full help."
+      fi
+      exit 0
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      ;;
+  esac
+done
+
+# ── Bootstrap ─────────────────────────────────────────────────────────────
+# The documented entry point is `curl … | sudo bash`, so this body may be on
+# stdin with no path of its own and no sibling files. ${BASH_SOURCE[0]} is then
+# unset — indexing it unguarded aborts under `set -u` — so locate a sibling
+# library explicitly, and only fall back to downloading the pinned copy.
+
+INSTALLER_LIB_PATH=""
+if [[ -f "./installer-lib.sh" ]]; then
+  INSTALLER_LIB_PATH="$(pwd)/installer-lib.sh"
+elif [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  INSTALLER_LIB_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer-lib.sh"
+fi
+if [[ ! -f "$INSTALLER_LIB_PATH" ]]; then
+  INSTALLER_LIB_PATH=""
+fi
+
+INSTALLER_DIR=""
+if [[ -n "$INSTALLER_LIB_PATH" ]]; then
+  INSTALLER_DIR="$(dirname "$INSTALLER_LIB_PATH")"
+fi
+
+# Sourced only from a real sibling file. Downloading is a write plus a network
+# fetch, which a piped `--dry-run` must not perform.
+if [[ -n "$INSTALLER_LIB_PATH" ]]; then
+  # shellcheck source=scripts/install/installer-lib.sh
+  source "$INSTALLER_LIB_PATH"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  echo "[DRY-RUN] Would fetch installer-lib.sh from the pinned repository."
+  echo "[DRY-RUN] Would fetch flexserverctl.py, syntax-check it, then install it to /usr/local/bin/flexserverctl."
+  echo "[DRY-RUN] Zero writes and zero network changes would be made."
+  exit 0
+else
+  if ! command -v curl &>/dev/null; then
+    echo "Error: installer-lib.sh not found and curl is unavailable to fetch it." >&2
+    exit 1
+  fi
+  INSTALLER_LIB_PATH="$(mktemp)" || exit 1
+  if ! curl -fsSL -o "$INSTALLER_LIB_PATH" \
+    "https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/installer-lib.sh"; then
+    rm -f "$INSTALLER_LIB_PATH"
+    echo "Error: Could not fetch installer-lib.sh required by this installer." >&2
+    exit 1
+  fi
+  # shellcheck source=scripts/install/installer-lib.sh
+  source "$INSTALLER_LIB_PATH"
+  # Registered after sourcing: the library owns the cleanup list and EXIT trap.
+  INSTALLER_TMP_FILES+=("$INSTALLER_LIB_PATH")
+fi
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
@@ -48,9 +134,12 @@ BINARY_SRC=""
 CONFIG_SRC=""
 SERVICE_NAME="${SERVICE_NAME_DEFAULT}"
 SERVICE_USER="${SERVICE_USER_DEFAULT}"
-DRY_RUN=false
 UNINSTALL=false
 ENABLE_DOCKER_ACCESS=false
+INSTALL_CLI=true
+SKIP_CLI=false
+CLI_DEST="${FLEXSERVERCTL_DEST_DEFAULT}"
+CLI_SRC=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,6 +157,14 @@ while [[ $# -gt 0 ]]; do
       UNINSTALL=true; shift ;;
     --enable-docker-metrics-access)
       ENABLE_DOCKER_ACCESS=true; shift ;;
+    --install-cli)
+      INSTALL_CLI=true; SKIP_CLI=false; shift ;;
+    --skip-cli)
+      SKIP_CLI=true; shift ;;
+    --cli-source)
+      CLI_SRC="$2"; shift 2 ;;
+    --cli-dest)
+      CLI_DEST="$2"; shift 2 ;;
     --help)
       echo "Usage: sudo ./scripts/install/install-local-agent.sh --binary <path> --config <path> [options]"
       echo ""
@@ -83,6 +180,10 @@ while [[ $# -gt 0 ]]; do
       echo "                        does not exist on the system."
       echo "  --dry-run             Print what would be done without making changes."
       echo "  --uninstall           Stop, disable, and remove the agent."
+      echo "  --install-cli         Also install the flexserverctl CLI (default: on)."
+      echo "  --skip-cli            Do not install the flexserverctl CLI."
+      echo "  --cli-source <path>   Path to flexserverctl.py (default: sibling file, else download)."
+      echo "  --cli-dest <path>     CLI install path (default: ${FLEXSERVERCTL_DEST_DEFAULT})."
       echo "  --help                Show this help."
       exit 0 ;;
     *)
@@ -157,6 +258,9 @@ if [[ "$UNINSTALL" == "true" ]]; then
     fi
   fi
 
+  # /usr/local/bin/flexserverctl is deliberately preserved: the updater (and
+  # any later component install) may still need it.
+
   echo "[Uninstall] Note: API app data in /opt/vps-manager was preserved."
   echo "[Uninstall] Agent tokens can be revoked via the dashboard > Servers > Local Host."
   exit 0
@@ -226,6 +330,24 @@ if [[ "$ENABLE_DOCKER_ACCESS" == "true" ]]; then
     echo "    curl -fsSL https://get.docker.com | sh" >&2
     echo "  Or omit the flag to install without Docker socket access." >&2
     exit 1
+  fi
+fi
+
+# ── flexserverctl CLI — source and python3 prerequisite ───────────────────
+#
+# Checked before the install mutations below, so a missing python3 or a
+# failed pipe-mode download can never leave the agent installed but the CLI
+# missing. The atomic copy into place happens at the end of the install.
+CLI_RESOLVED_SOURCE=""
+if [[ "$INSTALL_CLI" == "true" && "$SKIP_CLI" == "false" ]]; then
+  if [[ "$DRY_RUN" == "false" ]]; then
+    if [[ -n "$CLI_SRC" ]]; then
+      FLEXSERVERCTL_SOURCE="$CLI_SRC"
+    fi
+    if ! prepare_flexserverctl_source; then
+      exit 1
+    fi
+    CLI_RESOLVED_SOURCE="$FLEXSERVERCTL_SRC"
   fi
 fi
 
@@ -398,6 +520,22 @@ else
   systemctl enable "${SERVICE_NAME}"
   systemctl restart "${SERVICE_NAME}"
   echo "  Started ${SERVICE_NAME} (enabled on boot)"
+fi
+
+if [[ "$INSTALL_CLI" == "true" && "$SKIP_CLI" == "false" ]]; then
+  echo "[flexserverctl] Installing CLI..."
+  if [[ "$DRY_RUN" == "true" ]]; then
+    if [[ -n "$CLI_SRC" ]]; then
+      echo "  [DRY-RUN] Would install ${CLI_SRC} -> ${CLI_DEST} (root:root 0755)"
+    elif resolve_flexserverctl_source &>/dev/null; then
+      echo "  [DRY-RUN] Would install $(resolve_flexserverctl_source) -> ${CLI_DEST} (root:root 0755)"
+    else
+      echo "  [DRY-RUN] Would download flexserverctl.py, then install it to ${CLI_DEST} (root:root 0755)"
+    fi
+  else
+    # Source was fetched and validated before the install mutations.
+    install_flexserverctl "$CLI_DEST" "${CLI_RESOLVED_SOURCE:-}"
+  fi
 fi
 
 echo ""

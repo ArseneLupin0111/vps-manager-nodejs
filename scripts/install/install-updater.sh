@@ -32,6 +32,12 @@
 #   --dry-run             Print what would be done without making changes.
 #   --uninstall           Stop/disable updater units and remove updater files.
 #                         Preserves /var/lib/vps-updater (journals, backups).
+#   --install-cli         Also install the flexserverctl CLI (default: on).
+#   --skip-cli            Do not install the flexserverctl CLI.
+#   --cli-source <path>   Path to flexserverctl.py (default: sibling file,
+#                         else download from the pinned repository).
+#   --cli-dest <path>     CLI install path (default:
+#                         /usr/local/bin/flexserverctl).
 #   --purge-state         With --uninstall: also remove /var/lib/vps-updater.
 #   --help                Show this help.
 #
@@ -61,11 +67,92 @@
 #                                  never pass commands, paths or units
 #   7. Enables the daemon and the path unit. Never touches
 #      vps-manager-agent.service beyond what the helper itself restarts.
+#   8. Installs flexserverctl.py to /usr/local/bin/flexserverctl (root:root
+#      0755, atomic, syntax-checked first; requires python3) unless --skip-cli.
 #
 # Requires root (except --dry-run, which works unprivileged).
 
 set -euo pipefail
 umask 077
+
+# ── Early flag scan ───────────────────────────────────────────────────────
+# Scanned before the bootstrap below so `--help` and `--dry-run` never touch
+# the network or the filesystem: a piped `--dry-run` must make zero writes,
+# including the library and CLI downloads. Root is intentionally NOT required
+# here so an unprivileged `--dry-run` still works.
+#
+# Scans without mutating positional parameters: a while/shift loop would
+# consume the argument list (e.g. --binary/--config values) before the main
+# option parser ever sees it, breaking every real invocation.
+DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    --help)
+      # Read the header only when genuinely running from a file: in pipe mode
+      # $0 can be the interpreter path (a binary), which would dump garbage.
+      installer_header=""
+      if [[ -r "$0" ]] && IFS= read -r installer_header < "$0" && [[ "$installer_header" == "#!"* ]]; then
+        sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'
+      else
+        echo "Usage: sudo install-updater.sh --binary <path> --manifest <path> [options]"
+        echo "Run this script from a file (clone the repository) to see the full help."
+      fi
+      exit 0
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      ;;
+  esac
+done
+
+# ── Bootstrap ─────────────────────────────────────────────────────────────
+# The documented entry point is `curl … | sudo bash`, so this body may be on
+# stdin with no path of its own and no sibling files. ${BASH_SOURCE[0]} is then
+# unset — indexing it unguarded aborts under `set -u` — so locate a sibling
+# library explicitly, and only fall back to downloading the pinned copy.
+
+INSTALLER_LIB_PATH=""
+if [[ -f "./installer-lib.sh" ]]; then
+  INSTALLER_LIB_PATH="$(pwd)/installer-lib.sh"
+elif [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  INSTALLER_LIB_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer-lib.sh"
+fi
+if [[ ! -f "$INSTALLER_LIB_PATH" ]]; then
+  INSTALLER_LIB_PATH=""
+fi
+
+INSTALLER_DIR=""
+if [[ -n "$INSTALLER_LIB_PATH" ]]; then
+  INSTALLER_DIR="$(dirname "$INSTALLER_LIB_PATH")"
+fi
+
+# Sourced only from a real sibling file. Downloading is a write plus a network
+# fetch, which a piped `--dry-run` must not perform.
+if [[ -n "$INSTALLER_LIB_PATH" ]]; then
+  # shellcheck source=scripts/install/installer-lib.sh
+  source "$INSTALLER_LIB_PATH"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  echo "[DRY-RUN] Would fetch installer-lib.sh from the pinned repository."
+  echo "[DRY-RUN] Would fetch flexserverctl.py, syntax-check it, then install it to /usr/local/bin/flexserverctl."
+  echo "[DRY-RUN] Zero writes and zero network changes would be made."
+  exit 0
+else
+  if ! command -v curl &>/dev/null; then
+    echo "Error: installer-lib.sh not found and curl is unavailable to fetch it." >&2
+    exit 1
+  fi
+  INSTALLER_LIB_PATH="$(mktemp)" || exit 1
+  if ! curl -fsSL -o "$INSTALLER_LIB_PATH" \
+    "https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/installer-lib.sh"; then
+    rm -f "$INSTALLER_LIB_PATH"
+    echo "Error: Could not fetch installer-lib.sh required by this installer." >&2
+    exit 1
+  fi
+  # shellcheck source=scripts/install/installer-lib.sh
+  source "$INSTALLER_LIB_PATH"
+  # Registered after sourcing: the library owns the cleanup list and EXIT trap.
+  INSTALLER_TMP_FILES+=("$INSTALLER_LIB_PATH")
+fi
 
 # ── Constants (fixed by the updater's production invariants) ──────────────
 
@@ -78,8 +165,16 @@ UNIT_DAEMON="/etc/systemd/system/vps-updater.service"
 UNIT_PATH="/etc/systemd/system/vps-updater-apply.path"
 UNIT_HELPER="/etc/systemd/system/vps-updater-apply.service"
 # Ed25519 manifest verification runs offline via the repo's existing CLI.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERIFY_MANIFEST_CLI="${SCRIPT_DIR}/../release/verify-manifest.mjs"
+# Guarded: in pipe mode ${BASH_SOURCE[0]} is unset and would abort under set -u.
+SCRIPT_DIR=""
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../release/verify-manifest.mjs" ]]; then
+  VERIFY_MANIFEST_CLI="${SCRIPT_DIR}/../release/verify-manifest.mjs"
+else
+  VERIFY_MANIFEST_CLI=""
+fi
 # The install target is always a Linux systemd host, whatever platform the
 # operator previews it from; arch follows the running machine.
 TARGET_OS="linux"
@@ -98,9 +193,12 @@ PUBKEY=""
 PUBKEY_FILE=""
 PUBKEY_ENV=""
 SHA256_EXPECTED=""
-DRY_RUN=false
 UNINSTALL=false
 PURGE_STATE=false
+INSTALL_CLI=true
+SKIP_CLI=false
+CLI_DEST="${FLEXSERVERCTL_DEST_DEFAULT}"
+CLI_SRC=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -124,8 +222,21 @@ while [[ $# -gt 0 ]]; do
       UNINSTALL=true; shift ;;
     --purge-state)
       PURGE_STATE=true; shift ;;
+    --install-cli)
+      INSTALL_CLI=true; SKIP_CLI=false; shift ;;
+    --skip-cli)
+      SKIP_CLI=true; shift ;;
+    --cli-source)
+      CLI_SRC="$2"; shift 2 ;;
+    --cli-dest)
+      CLI_DEST="$2"; shift 2 ;;
     --help)
-      sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'
+      installer_header=""
+      if [[ -r "$0" ]] && IFS= read -r installer_header < "$0" && [[ "$installer_header" == "#!"* ]]; then
+        sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'
+      else
+        echo "Usage: sudo install-updater.sh --binary <path> --manifest <path> [options]"
+      fi
       exit 0 ;;
     *)
       echo "Error: Unknown argument: $1" >&2
@@ -181,6 +292,9 @@ if [[ "$UNINSTALL" == "true" ]]; then
     echo "[Uninstall] Preserved ${STATE_DIR} (journals/backups; use --purge-state to remove)."
     echo "[Uninstall] Offline recovery: see docs/local-agent-upgrade-operations.md runbook."
   fi
+  # /usr/local/bin/flexserverctl is deliberately preserved: the local agent
+  # (and any later component install) may still need it.
+
   echo "[Uninstall] The agent unit ${UNIT_HELPER##*/} was not modified; vps-manager-agent keeps running."
   exit 0
 fi
@@ -234,6 +348,8 @@ fi
 if [[ ! -f "$VERIFY_MANIFEST_CLI" ]]; then
   echo "Error: verify-manifest.mjs not found: ${VERIFY_MANIFEST_CLI}" >&2
   echo "  install-updater.sh must ship alongside ../release/verify-manifest.mjs (scripts/install/ + scripts/release/)." >&2
+  echo "  This happens when the installer is piped from stdin (curl … | sudo bash):" >&2
+  echo "  clone the repository or copy scripts/ and release/ next to this script instead." >&2
   exit 1
 fi
 if ! command -v node &>/dev/null; then
@@ -358,6 +474,26 @@ if ! CFG_ERR="$(node -e '
   echo "Error: Config is not a valid updater config (see plan §5): ${CONFIG_SRC}" >&2
   printf '%s\n' "$CFG_ERR" | sed 's/^/  /' >&2
   exit 1
+fi
+
+# ── flexserverctl CLI — source and python3 prerequisite ───────────────────
+#
+# Checked before the install mutations below, so a missing python3 or a
+# failed pipe-mode download can never leave the updater installed but the CLI
+# missing. Also independent of the strict HTTPS apiBase gate: a host that
+# cannot migrate today still gets a working CLI. The atomic copy into place
+# happens at the end of the install.
+CLI_RESOLVED_SOURCE=""
+if [[ "$INSTALL_CLI" == "true" && "$SKIP_CLI" == "false" ]]; then
+  if [[ "$DRY_RUN" == "false" ]]; then
+    if [[ -n "$CLI_SRC" ]]; then
+      FLEXSERVERCTL_SOURCE="$CLI_SRC"
+    fi
+    if ! prepare_flexserverctl_source; then
+      exit 1
+    fi
+    CLI_RESOLVED_SOURCE="$FLEXSERVERCTL_SRC"
+  fi
 fi
 
 # ── Install ───────────────────────────────────────────────────────────────
@@ -562,3 +698,20 @@ echo "Check status: sudo ${BINARY_DEST} status -config ${CONFIG_FILE}"
 echo "Ack a hold:   sudo -u ${SERVICE_USER} ${BINARY_DEST} ack -config ${CONFIG_FILE}"
 echo "View logs:    sudo journalctl -u vps-updater.service -f"
 echo "Runbook:      docs/local-agent-upgrade-operations.md"
+
+# ── flexserverctl CLI ─────────────────────────────────────────────────────
+
+if [[ "$INSTALL_CLI" == "true" && "$SKIP_CLI" == "false" ]]; then
+  echo "[flexserverctl] Installing CLI..."
+  if [[ "$DRY_RUN" == "true" ]]; then
+    if [[ -n "$CLI_SRC" ]]; then
+      echo "  [DRY-RUN] Would install ${CLI_SRC} -> ${CLI_DEST} (root:root 0755, atomic)"
+    elif resolve_flexserverctl_source &>/dev/null; then
+      echo "  [DRY-RUN] Would install $(resolve_flexserverctl_source) -> ${CLI_DEST} (root:root 0755, atomic)"
+    else
+      echo "  [DRY-RUN] Would download flexserverctl.py, then install it to ${CLI_DEST} (root:root 0755, atomic)"
+    fi
+  else
+    install_flexserverctl "$CLI_DEST" "${CLI_RESOLVED_SOURCE:-}"
+  fi
+fi

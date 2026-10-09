@@ -14,9 +14,9 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { networkInterfaces } from "node:os";
 import { Client, type SFTPWrapper } from "ssh2";
 import { loadAppConfig } from "../../packages/api/src/config/app-config.js";
+import { resolveAgentBackendUrl } from "../../packages/api/src/agents/agent-installer.service.js";
 import { createRepositories } from "../../packages/api/src/persistence/repositories/create-repositories.js";
 import { buildDockerStateProvisionCommand } from "../../packages/api/src/agents/agent-lifecycle-remote.js";
 
@@ -63,28 +63,6 @@ function parseEnvFile(path: string) {
         return [line.slice(0, index).trim(), value];
       }),
   );
-}
-
-function same24(a: string, b: string) {
-  const ap = a.split(".");
-  const bp = b.split(".");
-  return (
-    ap.length === 4 &&
-    bp.length === 4 &&
-    ap[0] === bp[0] &&
-    ap[1] === bp[1] &&
-    ap[2] === bp[2]
-  );
-}
-
-function chooseBackendUrl(vpsHost: string, configured?: string) {
-  if (configured) return configured;
-  const ips = Object.values(networkInterfaces())
-    .flatMap((entries) => entries || [])
-    .filter((entry) => entry.family === "IPv4" && !entry.internal)
-    .map((entry) => entry.address);
-  const matchingLanIp = ips.find((ip) => same24(ip, vpsHost));
-  return `http://${matchingLanIp || ips[0] || "127.0.0.1"}:3000`;
 }
 
 function connect(input: {
@@ -218,7 +196,7 @@ async function main() {
     );
 
   const { config, vps, token, credentialId } = await createAgentToken(vpsId);
-  const backendUrl = chooseBackendUrl(vps.host, config.agentPublicBaseUrl);
+  const backendUrl = resolveAgentBackendUrl(config);
   const agentConfig = {
     backendUrl,
     vpsId,

@@ -34,7 +34,7 @@ import {
  * - If the request host is localhost/127.0.0.1/::1, fail — no silent localhost config.
  * - Otherwise, use request protocol + host.
  */
-function resolveAgentBackendUrl(config: AppConfig): string {
+export function resolveAgentBackendUrl(config: AppConfig): string {
   if (!config.agentPublicBaseUrl) {
     throw new BadRequestException(
       "AGENT_PUBLIC_BASE_URL must be configured before installing the agent. Set it to a URL reachable from the target VPS.",

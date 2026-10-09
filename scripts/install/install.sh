@@ -3,7 +3,9 @@
 # install.sh — One-command VPS Manager installer.
 #
 # Installs the Docker app (web + API) and optionally the host systemd agent
-# on a Linux amd64 server.
+# on a Linux amd64 server. Also installs flexserverctl
+# (scripts/install/flexserverctl.py) to /usr/local/bin/flexserverctl when
+# present (requires python3).
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/install.sh | sudo bash
@@ -35,9 +37,88 @@
 #   7. Extracts agent binary from API container.
 #   8. Bootstraps agent credential via API container.
 #   9. Installs host systemd agent (unless --skip-agent).
+#  10. Installs flexserverctl CLI to /usr/local/bin/flexserverctl (requires python3).
 
 set -euo pipefail
 umask 077
+
+# ── Early flag scan ───────────────────────────────────────────────────────
+# Scanned before the bootstrap below so `--help` and `--dry-run` never touch
+# the network or the filesystem: a piped `--dry-run` must make zero writes,
+# including the library and CLI downloads. $0 is unreadable in pipe mode, so
+# help is printed from the in-body list below instead of re-reading $0.
+#
+# Scans without mutating positional parameters: a while/shift loop would
+# consume the argument list before the main option parser ever sees it.
+DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    --help)
+      echo "Usage: sudo $0 [options]"
+      echo ""
+      echo "Options:"
+      echo "  --help                    Show this help."
+      echo "  --dry-run                 Print what would be done without making changes."
+      echo ""
+      echo "See the script header or '--help' after bootstrap for the full list."
+      exit 0
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      ;;
+  esac
+done
+
+# ── Bootstrap ─────────────────────────────────────────────────────────────
+# The documented entry point is `curl … | sudo bash`, so this body may be on
+# stdin with no path of its own and no sibling files. ${BASH_SOURCE[0]} is then
+# unset — indexing it unguarded aborts under `set -u` — so locate a sibling
+# library explicitly, and only fall back to downloading the pinned copy.
+
+INSTALLER_LIB_PATH=""
+if [[ -f "./installer-lib.sh" ]]; then
+  INSTALLER_LIB_PATH="$(pwd)/installer-lib.sh"
+elif [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  INSTALLER_LIB_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer-lib.sh"
+fi
+if [[ ! -f "$INSTALLER_LIB_PATH" ]]; then
+  INSTALLER_LIB_PATH=""
+fi
+
+INSTALLER_DIR=""
+if [[ -n "$INSTALLER_LIB_PATH" ]]; then
+  INSTALLER_DIR="$(dirname "$INSTALLER_LIB_PATH")"
+fi
+
+# The library is sourced only from a real sibling file. Downloading it is a
+# write (mktemp + curl) plus a network fetch, which a piped `--dry-run` must
+# not perform, so that path is skipped and the remaining behaviour is
+# simulated from the script's own logic.
+if [[ -n "$INSTALLER_LIB_PATH" ]]; then
+  # shellcheck source=scripts/install/installer-lib.sh
+  source "$INSTALLER_LIB_PATH"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  echo "[DRY-RUN] Would fetch installer-lib.sh from the pinned repository."
+  echo "[DRY-RUN] Would fetch flexserverctl.py, syntax-check it, then install it to /usr/local/bin/flexserverctl."
+  echo "[DRY-RUN] Zero writes and zero network changes would be made."
+  exit 0
+else
+  if ! command -v curl &>/dev/null; then
+    echo "Error: installer-lib.sh not found and curl is unavailable to fetch it." >&2
+    exit 1
+  fi
+  INSTALLER_LIB_PATH="$(mktemp)" || exit 1
+  if ! curl -fsSL -o "$INSTALLER_LIB_PATH" \
+    "https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/installer-lib.sh"; then
+    rm -f "$INSTALLER_LIB_PATH"
+    echo "Error: Could not fetch installer-lib.sh required by this installer." >&2
+    exit 1
+  fi
+  # shellcheck source=scripts/install/installer-lib.sh
+  source "$INSTALLER_LIB_PATH"
+  # Registered after sourcing: the library owns the cleanup list and EXIT trap.
+  INSTALLER_TMP_FILES+=("$INSTALLER_LIB_PATH")
+fi
 
 # ── Defaults ──────────────────────────────────────────────────────────────
 
@@ -53,21 +134,11 @@ INSTALL_DOCKER=false
 SKIP_PULL=false
 SKIP_AGENT=false
 ROTATE_AGENT=false
-DRY_RUN=false
 GENERATED_PASSWORD=""
 AGENT_SERVICE_NAME="vps-manager-agent"
 AGENT_CONFIG_FILE="/etc/vps-manager-agent/config.json"
 ENABLE_DOCKER_METRICS_ACCESS=false
-TMP_FILES=()
-
-cleanup_tmp_files() {
-  for tmp_file in "${TMP_FILES[@]}"; do
-    if [[ -n "$tmp_file" && -f "$tmp_file" ]]; then
-      rm -f "$tmp_file"
-    fi
-  done
-}
-trap cleanup_tmp_files EXIT
+FLEXSERVERCTL_DEST="/usr/local/bin/flexserverctl"
 
 random_hex() {
   local bytes="$1"
@@ -140,6 +211,20 @@ if [[ "$(uname -s)" != "Linux" ]] || [[ "$ARCH" != "x86_64" ]]; then
   exit 1
 fi
 
+# Python3 prerequisite plus CLI source readiness — both checked before any
+# mutation (directory creation, Docker work, or image pulls) so a missing
+# interpreter, an absent --cli-source, or a broken/truncated file can never
+# leave a half-configured host behind. The final copy to /usr/local/bin still
+# happens at the end of the install.
+if [[ "$DRY_RUN" == "false" ]]; then
+  if ! require_python3_for_cli; then
+    exit 1
+  fi
+  if ! prepare_flexserverctl_source; then
+    exit 1
+  fi
+fi
+
 # Docker check
 if ! command -v docker &>/dev/null; then
   if [[ "$INSTALL_DOCKER" == "true" ]]; then
@@ -190,8 +275,10 @@ fi
 
 # Preserve existing dashboard session secret if env file exists.
 CURRENT_DASHBOARD_SECRET=""
+CURRENT_AGENT_PUBLIC_BASE_URL=""
 if [[ -f "$ENV_FILE" ]]; then
   CURRENT_DASHBOARD_SECRET=$(grep -E '^DASHBOARD_SESSION_SECRET=' "$ENV_FILE" | cut -d= -f2- || true)
+  CURRENT_AGENT_PUBLIC_BASE_URL=$(grep -E '^AGENT_PUBLIC_BASE_URL=' "$ENV_FILE" | cut -d= -f2- || true)
 fi
 
 if [[ -z "$CURRENT_DASHBOARD_SECRET" ]]; then
@@ -199,21 +286,82 @@ if [[ -z "$CURRENT_DASHBOARD_SECRET" ]]; then
   CURRENT_DASHBOARD_SECRET="${CURRENT_DASHBOARD_SECRET:0:64}"
 fi
 
-if [[ -z "$BACKEND_URL" ]]; then
-  BACKEND_URL="http://127.0.0.1:${APP_PORT}"
+# ── URL resolution ────────────────────────────────────────────────────────
+#
+# Precedence (contract order):
+#   1. Explicit --backend-url flag.
+#   2. AGENT_PUBLIC_BASE_URL (env var, else existing .env value).
+#   3. Loopback default, used only for the local agent bootstrap — never
+#      published as a remote-reachable AGENT_PUBLIC_BASE_URL.
+#
+# BACKEND_URL (what the local agent is told to call) picks the first of
+# (1) > (2) > loopback. AGENT_PUBLIC_BASE_URL (canonical remote install URL)
+# is written only when steps 1/2 yield a compliant non-loopback URL; an
+# explicit valid HTTPS --backend-url replaces a stale .env value.
+
+EFFECTIVE_AGENT_PUBLIC_BASE_URL=""
+RESOLVED_BACKEND_URL=""
+
+# Step 1 — explicit --backend-url flag.
+if [[ -n "$BACKEND_URL" ]]; then
+  # Scheme/format validation happens before any resolution, so an
+  # unsupported scheme (e.g. ftp://) cannot fall through into the canonical
+  # public URL the runtime would later refuse.
+  if ! validate_backend_url "$BACKEND_URL" "$ALLOW_INSECURE_BACKEND_URL"; then
+    exit 1
+  fi
+  RESOLVED_BACKEND_URL="$BACKEND_URL"
+  if url_is_remote_publishable "$BACKEND_URL"; then
+    # Valid HTTPS: publish it as the canonical remote install URL, replacing
+    # any stale configured value.
+    EFFECTIVE_AGENT_PUBLIC_BASE_URL="$BACKEND_URL"
+  else
+    # Plain http, accepted only for a real loopback host (or via the explicit
+    # --allow-insecure-backend-url escape hatch). Loopback is fine for the
+    # local agent but is never advertised remotely.
+    BACKEND_PARSED="$(parse_backend_url "$BACKEND_URL")" || BACKEND_PARSED=""
+    BACKEND_HOST="${BACKEND_PARSED##* }"
+    if [[ "$BACKEND_PARSED" == http* ]] && is_loopback_host "$BACKEND_HOST"; then
+      if [[ -n "${AGENT_PUBLIC_BASE_URL:-}" ]]; then
+        EFFECTIVE_AGENT_PUBLIC_BASE_URL="${AGENT_PUBLIC_BASE_URL}"
+      elif [[ -n "$CURRENT_AGENT_PUBLIC_BASE_URL" ]]; then
+        EFFECTIVE_AGENT_PUBLIC_BASE_URL="$CURRENT_AGENT_PUBLIC_BASE_URL"
+      fi
+    else
+      EFFECTIVE_AGENT_PUBLIC_BASE_URL="$BACKEND_URL"
+    fi
+  fi
+else
+  # Step 2 — configured canonical URL (env var beats the existing .env value).
+  if [[ -n "${AGENT_PUBLIC_BASE_URL:-}" ]]; then
+    if ! validate_backend_url "${AGENT_PUBLIC_BASE_URL}" true; then
+      exit 1
+    fi
+    RESOLVED_BACKEND_URL="${AGENT_PUBLIC_BASE_URL}"
+    EFFECTIVE_AGENT_PUBLIC_BASE_URL="${AGENT_PUBLIC_BASE_URL}"
+  elif [[ -n "$CURRENT_AGENT_PUBLIC_BASE_URL" ]]; then
+    if ! validate_backend_url "$CURRENT_AGENT_PUBLIC_BASE_URL" true; then
+      exit 1
+    fi
+    RESOLVED_BACKEND_URL="$CURRENT_AGENT_PUBLIC_BASE_URL"
+    EFFECTIVE_AGENT_PUBLIC_BASE_URL="$CURRENT_AGENT_PUBLIC_BASE_URL"
+  fi
 fi
 
-if [[ "$BACKEND_URL" == http://* ]]; then
-  case "$BACKEND_URL" in
-    http://127.0.0.1:*|http://127.0.0.1/*|http://localhost:*|http://localhost/*|http://\[::1\]*|http://\[::1\]/*) ;;
-    *)
-      if [[ "$ALLOW_INSECURE_BACKEND_URL" != "true" ]]; then
-        echo "Error: Refusing non-loopback HTTP backend URL: ${BACKEND_URL}" >&2
-        echo "  Use HTTPS, a loopback URL, or pass --allow-insecure-backend-url explicitly." >&2
-        exit 1
-      fi
-      ;;
-  esac
+# Step 3 — loopback default, used only for the local agent bootstrap.
+# (URL validation already happened above, so the loopback default is the only
+# remaining case that needs no further checks.)
+if [[ -z "$RESOLVED_BACKEND_URL" ]]; then
+  RESOLVED_BACKEND_URL="http://127.0.0.1:${APP_PORT}"
+fi
+BACKEND_URL="$RESOLVED_BACKEND_URL"
+
+# ALLOW_INSECURE_AGENT_HTTP must agree with the persisted public URL scheme:
+# resolveAgentBackendUrl() rejects an http:// AGENT_PUBLIC_BASE_URL unless this
+# is true, so keep the two consistent instead of hardcoding false.
+ALLOW_INSECURE_AGENT_HTTP_VALUE=false
+if [[ "$EFFECTIVE_AGENT_PUBLIC_BASE_URL" == http://* ]]; then
+  ALLOW_INSECURE_AGENT_HTTP_VALUE=true
 fi
 
 ENV_CONTENT=$(
@@ -235,7 +383,8 @@ DASHBOARD_COOKIE_SAME_SITE=lax
 
 ENABLE_WEB_TERMINAL=false
 ALLOW_PRIVATE_NETWORK_TARGETS=false
-ALLOW_INSECURE_AGENT_HTTP=false
+ALLOW_INSECURE_AGENT_HTTP=${ALLOW_INSECURE_AGENT_HTTP_VALUE}
+AGENT_PUBLIC_BASE_URL=${EFFECTIVE_AGENT_PUBLIC_BASE_URL}
 
 TRUST_PROXY_HOPS=0
 RATE_LIMIT_WINDOW_MS=60000
@@ -452,7 +601,7 @@ else
     echo "  [DRY-RUN] Would extract agent binary from API container..."
   else
     AGENT_BIN_TMP="$(mktemp)"
-    TMP_FILES+=("$AGENT_BIN_TMP")
+    INSTALLER_TMP_FILES+=("$AGENT_BIN_TMP")
     if ! docker cp "${API_CONTAINER}:/app/agent/vps-agent-linux-amd64" "$AGENT_BIN_TMP" &>/dev/null; then
       echo "Error: Failed to extract agent binary from API container." >&2
       echo "  Ensure API image has the agent at /app/agent/vps-agent-linux-amd64" >&2
@@ -476,15 +625,12 @@ else
       echo "  Reusing existing agent config: ${AGENT_CONFIG_FILE}"
     else
       AGENT_CONFIG_TMP="$(mktemp)"
-      TMP_FILES+=("$AGENT_CONFIG_TMP")
+      INSTALLER_TMP_FILES+=("$AGENT_CONFIG_TMP")
       AGENT_CONFIG_CREATED=true
       BOOTSTRAP_ARGS=(node dist/scripts/bootstrap-local-agent.js \
         --backend-url "$BACKEND_URL" \
         --config-only \
         --rotate)
-      if [[ "$ALLOW_INSECURE_BACKEND_URL" == "true" ]]; then
-        BOOTSTRAP_ARGS+=(--allow-insecure-backend-url)
-      fi
       if ! docker compose -f "$COMPOSE_FILE" exec -T api "${BOOTSTRAP_ARGS[@]}" > "$AGENT_CONFIG_TMP" 2>/dev/null; then
         echo "Error: Bootstrap failed." >&2
         echo "  Check logs: docker compose -f ${COMPOSE_FILE} logs api" >&2
@@ -508,7 +654,7 @@ else
           echo "  [DRY-RUN] Would download install-local-agent.sh from GitHub"
         else
           INSTALL_SCRIPT="$(mktemp)"
-          TMP_FILES+=("$INSTALL_SCRIPT")
+          INSTALLER_TMP_FILES+=("$INSTALL_SCRIPT")
           curl -fsSL -o "$INSTALL_SCRIPT" "https://raw.githubusercontent.com/sondoan17/vps-manager-nodejs/main/scripts/install/install-local-agent.sh"
           chmod 0755 "$INSTALL_SCRIPT"
         fi
@@ -552,6 +698,23 @@ else
   else
     echo "Warning: Agent binary or config could not be obtained. Skipping agent installation." >&2
   fi
+fi
+
+# ── flexserverctl CLI installation ─────────────────────────────────────────
+
+# The final copy happens here, at completion. Source fetch and the python3
+# prerequisite are checked earlier (before Docker work) so a pipe-mode
+# download failure cannot leave a half-configured host behind.
+
+echo "[flexserverctl] Installing CLI..."
+if [[ "$DRY_RUN" == "true" ]]; then
+  if [[ -n "${FLEXSERVERCTL_SRC:-}" ]] || resolve_flexserverctl_source &>/dev/null; then
+    echo "  [DRY-RUN] Would install $(resolve_flexserverctl_source) -> ${FLEXSERVERCTL_DEST} (root:root 0755)"
+  else
+    echo "  [DRY-RUN] Would download flexserverctl.py, then install it to ${FLEXSERVERCTL_DEST} (root:root 0755)"
+  fi
+else
+  install_flexserverctl "$FLEXSERVERCTL_DEST" "${FLEXSERVERCTL_SRC:-}"
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────────
