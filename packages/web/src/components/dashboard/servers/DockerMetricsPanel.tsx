@@ -38,7 +38,7 @@ function displayNames(containers: DashboardDockerContainerMetric[]) {
   return new Map(containers.map((container) => { const match = container.name.match(/^([a-zA-Z0-9.-]+)_([^_]+)_\d+$/); return [container.containerKey, match && (counts.get(match[1]) ?? 0) > 1 ? match[2] : container.name]; }));
 }
 
-function ContainerRow({ container, name, stale, roomy = false }: { container: DashboardDockerContainerMetric; name: string; stale: boolean; roomy?: boolean }) {
+function ContainerRow({ container, name, stale, roomy = false, linkTo }: { container: DashboardDockerContainerMetric; name: string; stale: boolean; roomy?: boolean; linkTo?: string }) {
   const running = isRunning(container);
   const status = running ? "Running" : isUnhealthy(container) ? "Unhealthy" : "Stopped";
   const pillTone = running ? "border-signal/40 bg-signal/10 text-signal" : isUnhealthy(container) ? "border-crit/40 bg-crit/10 text-crit" : "border-warn/40 bg-warn/10 text-warn";
@@ -52,7 +52,19 @@ function ContainerRow({ container, name, stale, roomy = false }: { container: Da
       <span className="flex min-w-0 items-center gap-2">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} aria-hidden="true" />
         <span className="min-w-0">
-          <span className="block truncate font-medium text-text">{name}</span>
+          <span className="block truncate font-medium text-text">
+            {linkTo ? (
+              <Link
+                to={linkTo}
+                className={linkBase}
+                aria-label={`View details for container ${name}`}
+              >
+                {name}
+              </Link>
+            ) : (
+              name
+            )}
+          </span>
           <span className="tnum block truncate text-[10px] text-dim" title={container.image}>{container.image}</span>
         </span>
       </span>
@@ -111,13 +123,23 @@ export function DockerMetricsPanel({ vps, dockerMetrics, busy, onToggle, present
   const total = Math.max(dockerMetrics?.containerTotal ?? containers.length, containers.length);
   const retainedDetails = total > containers.length;
 
+  // Detail links carry the full identity pair (instance + key), because the
+  // container key alone is not a valid stream/action identity. Both segments
+  // are URI-encoded: opaque ids may legitimately contain characters that must
+  // not terminate the path segment.
+  const agentInstanceId = dockerMetrics?.agentInstanceId;
+  const containerDetailBase =
+    typeof agentInstanceId === "string" && agentInstanceId.length > 0
+      ? `/vps/${encodeURIComponent(vps.id)}/docker/containers/${encodeURIComponent(agentInstanceId)}`
+      : null;
+
   let body: ReactNode;
   if (!enabled) body = <div className="border border-line bg-raised p-3"><p className="text-[13px] font-medium text-text">Docker monitoring is off.</p><p className="mt-1 text-[11px] text-dim">Enable it to see container health and resource usage.</p></div>;
   else if (!dockerMetrics) body = <div className="space-y-1" role="status"><div className="flex items-center gap-2 text-[12px] text-dim"><span className="pulse h-2 w-2 rounded-full bg-info" aria-hidden="true" />Waiting for Docker-capable agent.</div><p className="pl-4 text-[11px] text-dim">The first snapshot will appear here automatically.</p></div>;
   else if (!dockerMetrics.available) body = <div className="border border-crit/30 bg-crit/5 p-3" role="status"><p className="text-[13px] font-medium text-crit">Docker unavailable</p><p className="mt-1 text-[11px] leading-relaxed text-dim">{formatDockerError(dockerMetrics.errorCode)}</p>{updatedAt ? <p className="mt-2 text-[11px] text-dim">Last checked {freshnessLabel(updatedAt)}</p> : null}</div>;
   else if (!detail) body = <div className="space-y-2.5">
     <HealthSummary runningCount={runningCount} stoppedCount={stoppedCount} unhealthyCount={unhealthyCount} />
-    {containers.length ? <><ListHeader roomy={false} /><ul>{containers.slice(0, 3).map((container) => <ContainerRow key={container.containerKey} container={container} name={names.get(container.containerKey) ?? container.name} stale={notLive} />)}</ul></> : <p className="text-[12px] text-dim">No containers reported.</p>}
+    {containers.length ? <><ListHeader roomy={false} /><ul>{containers.slice(0, 3).map((container) => <ContainerRow key={container.containerKey} container={container} name={names.get(container.containerKey) ?? container.name} stale={notLive} linkTo={containerDetailBase ? `${containerDetailBase}/${encodeURIComponent(container.containerKey)}` : undefined} />)}</ul></> : <p className="text-[12px] text-dim">No containers reported.</p>}
     <Link to={`/vps/${encodeURIComponent(vps.id)}/docker`} className={`inline-flex min-h-8 items-center text-[11px] font-medium ${linkBase}`} aria-label={`View Docker details for ${vpsDisplayName(vps)}`}>View Docker details →</Link>
   </div>;
   else body = <div className="space-y-2.5">
@@ -133,7 +155,7 @@ export function DockerMetricsPanel({ vps, dockerMetrics, busy, onToggle, present
       <label className="sr-only" htmlFor={`docker-sort-${vps.id}`}>Sort containers</label>
       <select id={`docker-sort-${vps.id}`} value={sort} onChange={(event) => setSort(event.target.value as Sort)} className={controlBase}><option value="state">Sort: state</option><option value="name">Sort: name</option><option value="cpu">Sort: CPU</option><option value="memory">Sort: memory</option></select>
     </div><div className="space-y-0.5 text-[12px] text-dim"><div className="flex items-center justify-between gap-2"><span aria-live="polite">Showing {visible.length} detail rows of {total} reported containers</span>{filtered.length !== containers.length ? <span>{filtered.length} matches in details</span> : null}</div>{retainedDetails ? <p>Search and filters cover {containers.length} retained detail rows; {total - containers.length} reported containers have no detail row.</p> : null}</div>
-    {visible.length ? <><ListHeader roomy /><ul>{visible.map((container) => <ContainerRow key={container.containerKey} container={container} name={names.get(container.containerKey) ?? container.name} stale={notLive} roomy={detail} />)}</ul></> : <p className="py-3 text-center text-[12px] text-dim">No containers match this view.</p>}
+    {visible.length ? <><ListHeader roomy /><ul>{visible.map((container) => <ContainerRow key={container.containerKey} container={container} name={names.get(container.containerKey) ?? container.name} stale={notLive} roomy={detail} linkTo={containerDetailBase ? `${containerDetailBase}/${encodeURIComponent(container.containerKey)}` : undefined} />)}</ul></> : <p className="py-3 text-center text-[12px] text-dim">No containers match this view.</p>}
     {filtered.length > detailLimit || expanded ? <button type="button" className={`text-[12px] font-medium ${linkBase}`} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? "Show less ↑" : `Show more (max 20) →`}</button> : null}</> : <p className="text-[12px] text-dim">No containers reported.</p>}
   </div>;
 

@@ -167,23 +167,18 @@ export function LandingPage() {
 
       <main id="main-content" tabIndex={-1}>
         <section className="landing-hero" aria-labelledby="landing-hero-title">
-          <div className="landing-wrap landing-hero-grid">
+          <div className="landing-wrap">
             <div className="landing-hero-copy">
               <p className="landing-eyebrow">
                 <span className="landing-eyebrow-dot" aria-hidden="true" />
                 Self-hosted VPS operations dashboard
               </p>
               <h1 className="landing-hero-title" id="landing-hero-title">
-                <span className="landing-hero-line">Every VPS.</span>
-                <span className="landing-hero-line landing-hero-accent">
-                  One operations view.
-                </span>
+                Modern VPS Management
               </h1>
               <p className="landing-hero-sub">
-                FlexServer by FlexTechnology brings server health, Docker
-                checks, SSH jobs, metrics history, and audit events into one
-                workspace that you deploy on your own infrastructure. No
-                hosted account, no third-party data store.
+                Server health, Docker and SSH jobs. One workspace, on your
+                infrastructure.
               </p>
               <div className="landing-hero-ctas">
                 <a
@@ -204,27 +199,25 @@ export function LandingPage() {
                   Browse on GitHub
                 </a>
               </div>
-              <p className="landing-hero-caveat">
-                This page is informational only. There is no public demo here:
-                run your own deployment in demo mode to explore with simulated
-                data, or in local mode to manage real servers.
-              </p>
-              <ul className="landing-hero-meta" aria-label="Highlights">
-                <li className="landing-hero-meta-item">
-                  <Check size={15} aria-hidden="true" />
-                  Many servers in one place
-                </li>
-                <li className="landing-hero-meta-item">
-                  <Check size={15} aria-hidden="true" />
-                  Per-host resource history
-                </li>
-                <li className="landing-hero-meta-item">
-                  <Check size={15} aria-hidden="true" />
-                  Deploys on your infrastructure
-                </li>
-              </ul>
             </div>
 
+            <ul className="landing-hero-meta" aria-label="Highlights">
+              <li className="landing-hero-meta-item">
+                <Check size={15} aria-hidden="true" />
+                Many servers in one place
+              </li>
+              <li className="landing-hero-meta-item">
+                <Check size={15} aria-hidden="true" />
+                Per-host resource history
+              </li>
+              <li className="landing-hero-meta-item">
+                <Check size={15} aria-hidden="true" />
+                Deploys on your infrastructure
+              </li>
+            </ul>
+          </div>
+
+          <div className="landing-wrap landing-hero-preview-wrap">
             <figure
               className="landing-console"
               aria-labelledby="landing-console-title"
@@ -403,6 +396,12 @@ export function LandingPage() {
                 telemetry and never connects to your servers.
               </figcaption>
             </figure>
+            <p className="landing-hero-caveat">
+              No hosted account, no third-party data store. This page is
+              informational only and offers no public demo: run your own
+              deployment in demo mode to explore with simulated data, or in
+              local mode to manage real servers.
+            </p>
           </div>
         </section>
 

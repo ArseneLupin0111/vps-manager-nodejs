@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { DashboardProvider } from "./context/DashboardContext";
 import {
   VpsWorkspaceAuditPage,
+  VpsWorkspaceDockerContainerPage,
   VpsWorkspaceDockerPage,
   VpsWorkspaceJobsPage,
   VpsWorkspaceLayout,
@@ -173,6 +174,10 @@ function DashboardApp() {
             <Route index element={<VpsWorkspaceOverviewPage />} />
             <Route path="metrics" element={<VpsWorkspaceMetricsPage />} />
             <Route path="docker" element={<VpsWorkspaceDockerPage />} />
+            <Route
+              path="docker/containers/:agentInstanceId/:containerKey"
+              element={<VpsWorkspaceDockerContainerPage />}
+            />
             <Route path="jobs" element={<VpsWorkspaceJobsPage />} />
             <Route path="audit" element={<VpsWorkspaceAuditPage />} />
             <Route path="terminal" element={<VpsWorkspaceTerminalPage />} />

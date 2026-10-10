@@ -1,6 +1,15 @@
 # Changelog
 
+## Unreleased — dark navy landing redesign
+
+- Restyle the public landing in a Termius-style dark navy/blue palette scoped entirely to `.landing-page` in `pages/landing.css` via local tokens (`--l-bg`, `--l-panel`, `--l-raised`, `--l-line`, `--l-line-soft`, `--l-text`, `--l-dim`, `--l-blue`, `--l-ok`, `--l-warn`, `--l-violet`) with re-hued telemetry tokens, replacing the charcoal/lime marketing styles. Dashboard tokens, dashboard UI, and auth are unchanged; no new dependencies.
+- Center the hero on a single-line regular-weight title ("Modern VPS Management"), a concise lead ("Server health, Docker and SSH jobs. One workspace, on your infrastructure."), docs-primary/GitHub-secondary actions, a compact centered capability row, then a wide rounded static preview card with a blue atmospheric glow; tighten hero spacing so the preview starts higher on desktop.
+- Keep every landing invariant: all existing sections and anchor navigation, mobile menu/Escape/scroll lock, FAQ disclosures, contact email, external doc/repo links, and the no-hosted-account/no-public-demo caveat below the preview. No dashboard entry, signup, login, fetch, or `/vps` link.
+
 ## Unreleased — Docker realtime container logs
+
+- Move realtime container logs from the Docker list page to a dedicated container detail page at `/vps/:vpsId/docker/containers/:agentInstanceId/:containerKey`: each container row in `DockerMetricsPanel` links to its own detail route (carrying the full `agentInstanceId` + `containerKey` pair, both URI-encoded), the detail page renders a "Back to containers" affordance, its own container metadata, and the confirmed `start`/`stop`/`restart` controls plus the bounded realtime log viewer, and the Docker list page (`/vps/:vpsId/docker`) no longer mounts the management panel so browsing the list opens zero log subscriptions.
+- Keep the detail page bound to the container named by its URL: the target selector is replaced by fixed metadata, a container that is no longer in the server's current inventory is reported as unavailable with no log stream and no fallback to another container, and switching scope/container on the detail page clears the log buffer so a stream from a previous container can never deliver into another page.
 
 - Replace the manual Docker log refresh with on-demand realtime viewing: opening the container log view subscribes automatically to its target's log stream, and the agent opens one Docker `GET /containers/{id}/logs` follow request that returns the last 200 lines and then continues live. There is no snapshot-then-follow pair, so the fixed 200-line tail is read exactly once and never replayed within a subscription.
 - Stream logs over a dedicated SSE endpoint (`docker.logs.state`, `docker.logs.lines`, `docker.logs.closed`) backed by an ephemeral in-RAM broker (`DockerLogsService`, agent routes under `/api/agent/logs`). Log content stays out of `monitoring.snapshot`/`metrics.updated`, dashboards overview data, audit, jobs, metrics, and every JSON/PostgreSQL repository; there is no background collection, indexing, search, or download.

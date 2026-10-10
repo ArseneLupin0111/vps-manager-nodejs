@@ -1965,6 +1965,191 @@ describe("React dashboard", () => {
     });
   });
 
+  describe("Docker container detail route", () => {
+    // Route contract: /vps/:vpsId/docker/containers/:agentInstanceId/:containerKey
+    // renders one container's dedicated detail page, which is the only place
+    // the management/logs panel may mount.
+    const TARGET_INSTANCE = "inst-current";
+    const TARGET_KEY = "dc6d000000000000000000000000000000000000000000000000000000000002";
+
+    type MockResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
+    const ok = (data: unknown): MockResponse => ({ ok: true, status: 200, json: async () => data });
+
+    const dockerServer = {
+      id: "vps-1",
+      name: "web-01",
+      host: "10.0.0.1",
+      port: 22,
+      username: "root",
+      status: "healthy",
+      dockerMetricsEnabled: true,
+      dockerManagementEnabled: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const dashboard = {
+      mode: "local",
+      summary: { totalServers: 1, healthyServers: 1, warningServers: 0, unreachableServers: 0, runningJobs: 0 },
+      servers: [],
+      metrics: [],
+      dockerMetrics: [
+        {
+          vpsId: "vps-1",
+          collectedAt: "2026-01-01T00:00:00.000Z",
+          receivedAt: "2026-01-01T00:00:01.000Z",
+          agentInstanceId: TARGET_INSTANCE,
+          snapshotId: "snapshot-1",
+          sourceSequence: "1",
+          agentVersion: "1.2.3",
+          schemaVersion: 2,
+          available: true,
+          containerTotal: 1,
+          containerRunning: 1,
+          cpuPercent: 12.5,
+          memoryUsageBytes: 268435456,
+          networkRxBytes: 1024,
+          networkTxBytes: 2048,
+          blockReadBytes: 4096,
+          blockWriteBytes: 8192,
+          pids: 9,
+          containers: [
+            {
+              containerKey: TARGET_KEY,
+              name: "legacy-api",
+              image: "app:1",
+              state: "running",
+              status: "Up 2 minutes",
+              cpuPercent: 10,
+              memoryUsageBytes: 134217728,
+              networkRxBytes: 100,
+              networkTxBytes: 200,
+              blockReadBytes: 300,
+              blockWriteBytes: 400,
+              pids: 4,
+            },
+          ],
+        },
+      ],
+      jobs: [],
+      auditEvents: [],
+      terminal: { label: "Terminal", networkAccess: "disabled", commands: [], sessions: [] },
+      settings: { appMode: "local", webTerminalEnabled: false, realSshEnabled: false, authRequiredInLocalMode: true },
+    };
+
+    const capability = {
+      supported: true,
+      actions: ["start", "stop", "restart"],
+      logsSupported: true,
+      maxLogLines: 200,
+      targets: [
+        {
+          agentInstanceId: TARGET_INSTANCE,
+          containerKey: TARGET_KEY,
+          name: "legacy-api",
+          image: "app:1",
+          state: "running",
+        },
+      ],
+    };
+
+    function routeDetailPageFetch(
+      currentContainers: MockResponse = ok({
+        data: [{ agentInstanceId: TARGET_INSTANCE, containerKey: TARGET_KEY }],
+      }),
+      capabilityResponse: MockResponse = ok(capability),
+    ) {
+      fetchMock.mockImplementation(async (url: unknown) => {
+        const path = String(url);
+        if (path === "/api/auth/me") return ok({ data: { mode: "local", authenticated: false, authRequired: false } });
+        if (path === "/api/dashboard") return ok({ data: dashboard });
+        if (path === "/api/vps") return ok({ data: [dockerServer] });
+        if (path === "/api/vps/vps-1/docker/containers/current") return await currentContainers;
+        if (path === "/api/vps/vps-1/docker/management/capability") return await capabilityResponse;
+        if (path === "/api/vps/vps-1/docker/storage") return ok({ data: null });
+        if (path.startsWith("/api/vps/vps-1/docker/")) return ok({ data: [], page: { limit: 0, hasMore: false } });
+        return ok({ data: [] });
+      });
+    }
+
+    it("renders the container detail page directly from its URL", async () => {
+      routeDetailPageFetch();
+      renderApp([
+        `/vps/vps-1/docker/containers/${TARGET_INSTANCE}/${TARGET_KEY}`,
+      ]);
+
+      const detail = await screen.findByRole("region", {
+        name: "Docker container detail",
+      });
+      expect(
+        within(detail).getByRole("heading", { name: "Container detail" }),
+      ).toBeInTheDocument();
+      // The fixed target is named on the page; no selector is offered.
+      expect(
+        within(detail).queryByLabelText("Target container"),
+      ).not.toBeInTheDocument();
+      expect(within(detail).getByText("legacy-api")).toBeInTheDocument();
+      // It is the fixed target's own log surface, not the list page's.
+      expect(screen.queryByRole("region", { name: "Container history" })).not.toBeInTheDocument();
+    });
+
+    it("offers back navigation to the container list", async () => {
+      routeDetailPageFetch();
+      renderApp([
+        `/vps/vps-1/docker/containers/${TARGET_INSTANCE}/${TARGET_KEY}`,
+      ]);
+
+      const back = await screen.findByRole("link", { name: "Back to containers" });
+      expect(back).toHaveAttribute("href", "/vps/vps-1/docker");
+      await userEvent.click(back);
+
+      const region = await screen.findByRole("region", { name: "Container history" });
+      expect(region).toBeInTheDocument();
+      expect(
+        screen.queryByRole("region", { name: "Docker container detail" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("reports a stale container as unavailable without picking another target", async () => {
+      // Capability still advertises two containers; only the routed one is
+      // stale. The page must not silently attach to the survivor.
+      routeDetailPageFetch(
+        ok({ data: [] }),
+        ok({
+          ...capability,
+          targets: [
+            {
+              agentInstanceId: TARGET_INSTANCE,
+              containerKey: "other-container-key",
+              name: "other-api",
+              image: "other:1",
+              state: "running",
+            },
+          ],
+        }),
+      );
+      renderApp([
+        `/vps/vps-1/docker/containers/${TARGET_INSTANCE}/${TARGET_KEY}`,
+      ]);
+
+      expect(
+        await screen.findByText(
+          /This container is not reported in the server's current inventory/i,
+        ),
+      ).toBeInTheDocument();
+      // The surviving container is never named or streamed on this page.
+      expect(screen.queryByText("other-api")).not.toBeInTheDocument();
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        expect.stringContaining("/docker/management/logs/stream"),
+        expect.anything(),
+      );
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        expect.stringContaining("/docker/management/actions"),
+        expect.anything(),
+      );
+    });
+  });
+
   describe("Edit server regressions", () => {
     const editableServer = {
       id: "vps-edit-1",

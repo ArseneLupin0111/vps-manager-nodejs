@@ -35,7 +35,7 @@ type OperationState = {
 };
 
 /** One container identity: the pair, never the key alone. */
-type TargetPair = {
+export type TargetPair = {
   agentInstanceId: string;
   containerKey: string;
 };
@@ -109,11 +109,27 @@ function samePair(a: TargetPair | null, b: TargetPair | null): boolean {
  * between the capability response and the next paint must not leave an
  * unsubscribable target on screen, and React re-renders immediately when
  * the returned pair differs, so the effect below never sees a stale value.
+ *
+ * With `fixedTarget` the container identity is already decided by the route.
+ * There is then no browsing: the panel either serves exactly that pair or
+ * serves nothing. Falling back to "the first target" would silently point a
+ * page titled with one container at a different container's logs and
+ * controls, so a missing or stale pair resolves to `null`.
  */
 function selectScope(
   targetPair: TargetPair | null,
   containers: DockerManagementTarget[],
+  fixedTarget: TargetPair | null,
 ): TargetPair | null {
+  if (fixedTarget) {
+    const present = containers.some(
+      (target) =>
+        target.agentInstanceId === fixedTarget.agentInstanceId &&
+        target.containerKey === fixedTarget.containerKey,
+    );
+    if (!present) return null;
+    return samePair(targetPair, fixedTarget) ? targetPair : fixedTarget;
+  }
   if (containers.length === 0) return null;
   // The backend projects snapshots + metrics rows; fixtures can report the
   // same identity twice (differing only in name/image). Dedupe by pair so
@@ -219,11 +235,19 @@ export function DockerContainerManagementPanel({
   vpsId,
   enabled,
   refreshTick = 0,
+  fixedTarget = null,
 }: {
   vpsId: string;
   enabled: boolean;
   /** Capability reload tick from the workspace monitoring refresh. */
   refreshTick?: number;
+  /**
+   * When set, the panel is a detail view for exactly this container: the
+   * target selector disappears, the panel never falls back to another
+   * container, and a stale or missing identity reports the container as
+   * unavailable instead of streaming someone else's logs.
+   */
+  fixedTarget?: TargetPair | null;
 }) {
   const [capability, setCapability] =
     useState<DockerManagementCapability | null>(null);
@@ -324,9 +348,10 @@ export function DockerContainerManagementPanel({
   }, [vpsId, enabled, capabilityRetry, refreshTick]);
 
   // ── Target selection: always a live (agentInstanceId, containerKey) pair
-  // A pair that left the inventory is replaced by the first valid target,
-  // never silently kept, and never resolved by key alone.
-  const scopedPair = selectScope(targetPair, containers);
+  // In list mode a pair that left the inventory is replaced by the first
+  // valid target. With a route-fixed target, a stale or missing pair
+  // resolves to null so the page reports its own container as unavailable.
+  const scopedPair = selectScope(targetPair, containers, fixedTarget);
   if (scopedPair !== targetPair) {
     setTargetPair(scopedPair);
   }
@@ -655,7 +680,12 @@ export function DockerContainerManagementPanel({
   const streamOpen = streamStatus === "waiting" || streamStatus === "live";
   const streamLabel =
     streamStatus === "waiting"
-      ? "Waiting for agent"
+      ? // "Waiting for agent" must only be claimed for a scope that can
+        // actually subscribe. With no live target the viewer is idle, not
+        // waiting on an agent that will never arrive.
+        canStream
+        ? "Waiting for agent"
+        : "Idle"
       : streamStatus === "live"
         ? "Live"
         : streamStatus === "stopped"
@@ -672,22 +702,53 @@ export function DockerContainerManagementPanel({
 
   return (
     <section
-      aria-label="Docker container management"
+      aria-label={
+        fixedTarget
+          ? "Docker container detail"
+          : "Docker container management"
+      }
       className="border border-line bg-panel"
     >
       <header className="border-b border-line px-4 py-3">
-        <h3 className="text-[14px] font-semibold">Container management</h3>
+        <h3 className="text-[14px] font-semibold">
+          {fixedTarget ? "Container detail" : "Container management"}
+        </h3>
         <p className="mt-0.5 text-[12px] text-dim">
           Capability: {capability.actions.join(", ") || "no actions"} · logs{" "}
           {logsSupported ? "supported" : "not supported"} (last{" "}
-          {BACKEND_TAIL_LINES} lines, then live). Target a single container
-          below; every action asks for confirmation first.
+          {BACKEND_TAIL_LINES} lines, then live).{" "}
+          {fixedTarget
+            ? "This page targets one container; every action asks for confirmation first."
+            : "Target a single container below; every action asks for confirmation first."}
         </p>
       </header>
 
       <div className="p-4">
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
+            {fixedTarget ? (
+              <>
+                <p className="mb-1 block text-[11px] text-dim">Target container</p>
+                {selected ? (
+                  <>
+                    <p className="truncate text-[12px] font-medium text-text">
+                      {selected.name}
+                    </p>
+                    <p className="mt-1 truncate text-[11px] text-dim" title={selected.image}>
+                      key {selected.containerKey} · {selected.image} ·{" "}
+                      {selected.state}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-crit" role="status">
+                    This container is not reported in the server's current
+                    inventory.
+                  </p>
+                )}
+              </>
+            ) : null}
+            {!fixedTarget ? (
+            <>
             <label
               className="mb-1 block text-[11px] text-dim"
               htmlFor={`docker-management-target-${vpsId}`}
@@ -724,12 +785,7 @@ export function DockerContainerManagementPanel({
                         item.agentInstanceId === pair.agentInstanceId &&
                         item.containerKey === pair.containerKey,
                     )?.name ?? pair.containerKey}{" "}
-                    ·{" "}
-                    {containers.find(
-                      (item) =>
-                        item.agentInstanceId === pair.agentInstanceId &&
-                        item.containerKey === pair.containerKey,
-                    )?.state ?? "unknown"}
+                    ·
                   </option>
                 ));
               })()}
@@ -745,6 +801,8 @@ export function DockerContainerManagementPanel({
                 nothing to stream.
               </p>
             )}
+            </>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-end gap-2">
             {(["start", "stop", "restart"] as DockerManagementAction[]).map(
@@ -901,8 +959,9 @@ export function DockerContainerManagementPanel({
             </p>
           ) : selected === null ? (
             <p className="mt-2 text-[11px] text-dim">
-              No container has been reported for this server, so no log stream
-              is open.
+              {fixedTarget
+                ? "Container is unavailable, so no log stream is open."
+                : "No container has been reported for this server, so no log stream is open."}
             </p>
           ) : (
             <>

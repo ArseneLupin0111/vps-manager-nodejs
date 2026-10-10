@@ -317,7 +317,6 @@ export function VpsWorkspaceDockerPage() {
   const dashboard = useDashboard();
   const snapshot = overview.dockerMetrics[0];
   const monitoringEnabled = vps.dockerMetricsEnabled === true;
-  const managementEnabled = vps.dockerManagementEnabled === true;
   const [history, setHistory] = useState<DockerHostSample[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [rollups, setRollups] = useState<DockerMetricRollup[]>([]);
@@ -515,16 +514,15 @@ export function VpsWorkspaceDockerPage() {
         onToggle={dashboard.onToggleDockerMetrics}
         presentation="detail"
       />
+      <p className="mt-2 text-[11px] text-dim">
+        Select a container to open its own page with realtime logs and
+        confirmed controls.
+      </p>
       <div className="mt-4 space-y-4">
         <DockerCapabilityNotice enabled={monitoringEnabled} waiting={monitoringEnabled && !snapshot} />
-        <DockerContainerManagementPanel
-          vpsId={vps.id}
-          enabled={managementEnabled}
-          refreshTick={refreshTick}
-        />
         {monitoringEnabled ? (
           <>
-            <DockerHistoryChart samples={history} rollups={rollups} retained={historyTotal} loading={loading} error={resourceErrors.history} />{resourcePages.history?.hasMore ? <button type="button" onClick={() => loadMore("history")} disabled={loadingMore === "history"} className="text-xs text-signal underline">{loadingMore === "history" ? "Loading…" : "Load more history"}</button> : null}{resourcePages.rollups?.hasMore ? <button type="button" onClick={() => loadMore("rollups")} disabled={loadingMore === "rollups"} className="ml-3 text-xs text-signal underline">{loadingMore === "rollups" ? "Loading…" : "Load more rollups"}</button> : null}
+            <DockerHistoryChart samples={history} rollups={rollups} retained={historyTotal} loading={loading} error={resourceErrors.history} />{resourcePages.history?.hasMore ? <button type="button" onClick={() => loadMore("history")} disabled={loadingMore === "history"} className="text-xs text-signal underline">{loadingMore === "history" ? "Loading…" : "Load more history"}</button> : null}{resourcePages.rollups?.hasMore ? <button type="button" onClick={() => loadMore("rollups")} disabled={loadingMore === "rollups"} className="text-xs text-signal underline">{loadingMore === "rollups" ? "Loading…" : "Load more rollups"}</button> : null}
             <section aria-label="Container history" className="border border-line bg-panel p-4">
               <h3 className="text-xs font-medium text-text">Container history</h3>
               {currentTargets.length > 0 ? (
@@ -544,6 +542,64 @@ export function VpsWorkspaceDockerPage() {
           </>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+/**
+ * Detail page for exactly one container, addressed by the full identity pair
+ * from the route (`:agentInstanceId/:containerKey`).
+ *
+ * The identity is fixed here on purpose: this page never picks a target from
+ * the inventory on the user's behalf. A route that names a container the
+ * server no longer reports is rendered as unavailable — no log stream opens,
+ * and no control ever fires against a different container.
+ */
+export function VpsWorkspaceDockerContainerPage() {
+  const { vps, overview } = useVpsWorkspace();
+  const { agentInstanceId, containerKey } = useParams<{
+    agentInstanceId: string;
+    containerKey: string;
+  }>();
+  return (
+    <section aria-labelledby="server-docker-container-heading" className="min-w-0">
+      <div className="mb-5 max-w-3xl">
+        <Link
+          to={`/vps/${encodeURIComponent(vps.id)}/docker`}
+          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-info underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+        >
+          <ArrowLeft size={13} aria-hidden="true" />
+          Back to containers
+        </Link>
+        <p className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-dim">
+          Container detail
+        </p>
+        <h2
+          id="server-docker-container-heading"
+          className="text-xl font-semibold tracking-tight text-text sm:text-2xl"
+        >
+          Container logs and controls
+        </h2>
+        <p className="mt-1.5 text-sm leading-6 text-dim">
+          Realtime logs for this container on this server, with confirmed
+          start, stop, and restart actions.
+        </p>
+      </div>
+      <DockerContainerManagementPanel
+        vpsId={vps.id}
+        enabled={vps.dockerManagementEnabled === true}
+        fixedTarget={
+          agentInstanceId && containerKey
+            ? { agentInstanceId, containerKey }
+            : null
+        }
+      />
+      {!overview.dockerMetrics[0]?.available ? (
+        <DockerCapabilityNotice
+          enabled={vps.dockerMetricsEnabled === true}
+          waiting={vps.dockerMetricsEnabled === true && !overview.dockerMetrics[0]}
+        />
+      ) : null}
     </section>
   );
 }

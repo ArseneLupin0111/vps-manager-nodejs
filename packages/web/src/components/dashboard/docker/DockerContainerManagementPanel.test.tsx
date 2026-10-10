@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 // Depth is `src/components/dashboard/docker`, so the shared jest-dom matcher
 // setup is three levels up; this resolves from the repo root config too.
@@ -796,5 +796,160 @@ describe("DockerContainerManagementPanel logs", () => {
     expect(logBody()).toContain("round-a-0");
     expect(logBody()).toContain("round-c-99");
     expect(stream.closed).toBe(false);
+  });
+});
+
+describe("DockerContainerManagementPanel fixed target (container detail)", () => {
+  const DETAIL_TARGET = {
+    agentInstanceId: "agent-alpha",
+    containerKey: "container-two",
+  };
+
+  it("subscribes to the routed container and hides the target selector", async () => {
+    stubCapability({});
+
+    render(
+      <DockerContainerManagementPanel
+        vpsId="vps-1"
+        enabled
+        refreshTick={0}
+        fixedTarget={DETAIL_TARGET}
+      />,
+    );
+
+    const stream = await openStream();
+    expect(stream.url).toContain("agentInstanceId=agent-alpha");
+    expect(stream.url).toContain("containerKey=container-two");
+    expect(screen.queryByLabelText("Target container")).not.toBeInTheDocument();
+
+    act(() => stream.state("live"));
+    act(() => stream.lines([{ stream: "stdout", text: "detail-line", truncated: false }]));
+    await waitFor(() => expect(logBody()).toContain("detail-line"));
+  });
+
+  it("shows the container's own name and key on the detail surface", async () => {
+    stubCapability({});
+
+    render(
+      <DockerContainerManagementPanel
+        vpsId="vps-1"
+        enabled
+        refreshTick={0}
+        fixedTarget={DETAIL_TARGET}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("db")).toBeInTheDocument());
+    expect(screen.getByText(/container-two/)).toBeInTheDocument();
+    expect(screen.getByText("Container detail")).toBeInTheDocument();
+  });
+
+  it("reports a stale or missing container as unavailable and never falls back to another target", async () => {
+    stubCapability({
+      // The routed container is no longer in the inventory; only a
+      // different container remains. The page must not silently attach to it.
+      "vps-1": {
+        ...DEFAULT_CAPABILITY,
+        targets: [DEFAULT_CAPABILITY.targets[0]],
+      },
+    });
+
+    render(
+      <DockerContainerManagementPanel
+        vpsId="vps-1"
+        enabled
+        refreshTick={0}
+        fixedTarget={DETAIL_TARGET}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /This container is not reported in the server's current inventory/i,
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(openStreams).toHaveLength(0);
+    expect(screen.getByTestId("docker-log-stream-status").textContent).toBe(
+      "Idle",
+    );
+    expect(
+      screen.getByText(/Container is unavailable, so no log stream is open/i),
+    ).toBeInTheDocument();
+    // The survivor is never streamed from this page.
+    expect(screen.queryByText("web")).not.toBeInTheDocument();
+  });
+
+  it("confirms an action against the fixed container, never another target", async () => {
+    stubCapability({});
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(
+      <DockerContainerManagementPanel
+        vpsId="vps-1"
+        enabled
+        refreshTick={0}
+        fixedTarget={DETAIL_TARGET}
+      />,
+    );
+
+    const restart = await screen.findByRole("button", { name: "restart" });
+    expect(restart).toBeEnabled();
+    await userEvent.click(restart);
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByText(/Restart container/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/container-two/)).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: /Confirm restart/i }));
+    // The action POST carries the routed pair only.
+    await waitFor(() => {
+      const actionCall = fetchMock.mock.calls.find(([requestUrl]) =>
+        String(requestUrl).includes("/docker/management/actions"),
+      );
+      expect(actionCall).toBeTruthy();
+      const body = JSON.parse(String((actionCall?.[1] as RequestInit)?.body));
+      expect(body.action).toBe("restart");
+      expect(body.target).toEqual({
+        agentInstanceId: "agent-alpha",
+        containerKey: "container-two",
+      });
+    });
+  });
+
+  it("clears the log stream when the route switches to another container", async () => {
+    stubCapability({});
+    const { rerender } = render(
+      <DockerContainerManagementPanel
+        vpsId="vps-1"
+        enabled
+        refreshTick={0}
+        fixedTarget={DETAIL_TARGET}
+      />,
+    );
+    const first = await openStream();
+    act(() => first.state("live"));
+    act(() => first.lines([{ stream: "stdout", text: "container-two-line", truncated: false }]));
+    await waitFor(() => expect(logBody()).toContain("container-two-line"));
+
+    rerender(
+      <DockerContainerManagementPanel
+        vpsId="vps-1"
+        enabled
+        refreshTick={0}
+        fixedTarget={{ agentInstanceId: "agent-alpha", containerKey: "container-one" }}
+      />,
+    );
+
+    await waitFor(() => expect(openStreams).toHaveLength(2));
+    expect(first.closed).toBe(true);
+    const second = openStreams[1];
+    expect(second.url).toContain("containerKey=container-one");
+    await waitFor(() =>
+      expect(screen.queryByTestId("docker-log-body")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("web")).toBeInTheDocument();
   });
 });

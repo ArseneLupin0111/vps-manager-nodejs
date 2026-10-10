@@ -32,7 +32,7 @@ describe("DockerMetricsPanel details", () => {
   it("shows friendly known and unknown errors and preserves privacy copy", () => { const unavailable = metric({ available: false, errorCode: "permission_denied", containers: [] }); const { rerender } = view(unavailable); expect(screen.getByText(/does not have permission/)).toBeInTheDocument(); rerender(<DockerMetricsPanel vps={vps} dockerMetrics={metric({ available: false, errorCode: "new_error", containers: [] })} busy={false} onToggle={vi.fn()} />); expect(screen.getByText("Docker metrics are unavailable right now.")).toBeInTheDocument(); rerender(<DockerMetricsPanel vps={{ ...vps, dockerMetricsEnabled: false }} busy={false} onToggle={vi.fn()} />); fireEvent.click(screen.getByRole("button", { name: /Enable Docker metrics/ })); expect(screen.getByText(/Environment variables, logs, mounts, labels, and commands are not collected/)).toBeInTheDocument(); });
   it("uses the expanded server-detail hierarchy and shows eight rows initially", () => {
     const containers = Array.from({ length: 10 }, (_, index) => container(`service-${index}`, "app:latest"));
-    render(<DockerMetricsPanel vps={vps} dockerMetrics={metric({ containerTotal: 10, containers })} busy={false} onToggle={vi.fn()} presentation="detail" />);
+    render(<MemoryRouter><DockerMetricsPanel vps={vps} dockerMetrics={metric({ containerTotal: 10, containers })} busy={false} onToggle={vi.fn()} presentation="detail" /></MemoryRouter>);
     expect(screen.getByText("Container snapshot")).toBeInTheDocument();
     expect(screen.getByText("Monitoring is enabled for this server.")).toBeInTheDocument();
     expect(screen.getByText("Showing 8 detail rows of 10 reported containers")).toBeInTheDocument();
@@ -66,5 +66,118 @@ describe("DockerMetricsPanel details", () => {
     fireEvent.change(screen.getByLabelText("Filter containers"), { target: { value: "stopped" } });
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("worker")).toBeInTheDocument();
+  });
+});
+
+describe("DockerMetricsPanel container detail links", () => {
+  const detailView = (dockerMetrics: DashboardDockerMetrics) => {
+    render(
+      <MemoryRouter initialEntries={["/vps/vps-1/docker"]}>
+        <Routes>
+          <Route
+            path="/vps/:vpsId/docker"
+            element={
+              <DockerMetricsPanel
+                vps={vps}
+                dockerMetrics={dockerMetrics}
+                busy={false}
+                onToggle={vi.fn()}
+                presentation="detail"
+              />
+            }
+          />
+          <Route
+            path="/vps/:vpsId/docker/containers/:agentInstanceId/:containerKey"
+            element={<p>Container detail page</p>}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  };
+
+  it("links each container to its own detail route with agent instance identity", () => {
+    detailView(
+      metric({
+        containers: [
+          container("api", "app:latest"),
+          container("worker", "jobs:latest"),
+        ],
+      }),
+    );
+
+    const apiLink = screen.getByRole("link", {
+      name: "View details for container api",
+    });
+    expect(apiLink).toHaveAttribute(
+      "href",
+      "/vps/vps-1/docker/containers/agent-1/api",
+    );
+    const workerLink = screen.getByRole("link", {
+      name: "View details for container worker",
+    });
+    expect(workerLink).toHaveAttribute(
+      "href",
+      "/vps/vps-1/docker/containers/agent-1/worker",
+    );
+  });
+
+  it("navigates to the container detail page on click", () => {
+    detailView(metric({ containers: [container("api", "app:latest")] }));
+
+    fireEvent.click(
+      screen.getByRole("link", { name: "View details for container api" }),
+    );
+    expect(screen.getByText("Container detail page")).toBeInTheDocument();
+  });
+
+  it("omits the detail link when the agent instance is unknown", () => {
+    detailView(
+      metric({
+        agentInstanceId: "",
+        containers: [container("api", "app:latest")],
+      }),
+    );
+
+    expect(
+      screen.queryByRole("link", { name: "View details for container api" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("api")).toBeInTheDocument();
+  });
+
+  it("links compact rows too, not only expanded detail rows", () => {
+    render(
+      <MemoryRouter initialEntries={["/vps"]}>
+        <Routes>
+          <Route
+            path="/vps"
+            element={
+              <DockerMetricsPanel
+                vps={vps}
+                dockerMetrics={metric({
+                  containers: [container("api", "app:latest")],
+                })}
+                busy={false}
+                onToggle={vi.fn()}
+                presentation="compact"
+              />
+            }
+          />
+          <Route
+            path="/vps/:vpsId/docker/containers/:agentInstanceId/:containerKey"
+            element={<p>Container detail page</p>}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole("link", {
+      name: "View details for container api",
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "/vps/vps-1/docker/containers/agent-1/api",
+    );
+    fireEvent.click(link);
+    expect(screen.getByText("Container detail page")).toBeInTheDocument();
   });
 });
