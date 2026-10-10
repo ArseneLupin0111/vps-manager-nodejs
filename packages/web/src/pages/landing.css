@@ -985,6 +985,157 @@
   max-width: 38rem;
 }
 
+/* Pinned features track list: baseline static flow (mobile, short viewports, reduced motion, or unpinned) */
+.landing-features-scene {
+  position: relative;
+}
+
+.landing-features-track-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid hsl(var(--l-line));
+}
+
+.landing-feature-track {
+  display: block;
+}
+
+.landing-feature-stage {
+  display: block;
+}
+
+.landing-feature-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.landing-feature-tag {
+  display: none;
+}
+
+@media (min-width: 64rem) and (min-height: 40rem) {
+  @media not (prefers-reduced-motion: reduce) {
+    /* Pinned features storytelling: native position:sticky scroll tracks per feature */
+    .landing-features-scene[data-features-active] {
+      position: relative;
+    }
+
+    .landing-features-scene[data-features-active] .landing-features-track-list {
+      display: flex;
+      flex-direction: column;
+      border-top: none;
+      gap: 0;
+    }
+
+    /* Individual feature scroll track holding a modest interval */
+    .landing-features-scene[data-features-active] .landing-feature-track {
+      position: relative;
+      min-height: calc(var(--feature-stage-height) + 40vh);
+    }
+
+    /* Last feature cleanly releases into next marketing section */
+    .landing-features-scene[data-features-active] .landing-feature-track:last-child {
+      min-height: calc(var(--feature-stage-height) + 20vh);
+    }
+
+    /* Sticky surface holding each panel below the sticky header */
+    .landing-features-scene[data-features-active] .landing-feature-stage {
+      position: sticky;
+      top: calc(var(--landing-header-h) + 1.5rem);
+      z-index: 1;
+    }
+
+    .landing-features-scene[data-features-active] .landing-feature-stage:focus-within {
+      z-index: 10;
+    }
+
+    /* Enhanced presentation panel for pinned feature */
+    .landing-features-scene[data-features-active] .landing-feature-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      padding: clamp(2rem, 3.5vw, 2.75rem);
+      background: hsl(var(--l-panel));
+      border: 1px solid hsl(var(--l-line));
+      border-radius: 1.25rem;
+      box-shadow:
+        0 20px 48px -16px hsl(228 60% 2% / 0.8),
+        0 0 0 1px hsl(var(--l-line));
+      max-width: 58rem;
+      margin-inline: auto;
+      position: relative;
+      overflow: hidden;
+      border-bottom: 1px solid hsl(var(--l-line));
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .landing-features-scene[data-features-active] .landing-feature-panel::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        hsl(var(--l-blue) / 0.6),
+        transparent
+      );
+      pointer-events: none;
+    }
+
+    .landing-features-scene[data-features-active] .landing-feature-panel:hover,
+    .landing-features-scene[data-features-active] .landing-feature-panel:focus-within {
+      border-color: hsl(var(--l-blue) / 0.45);
+      box-shadow:
+        0 24px 56px -16px hsl(228 60% 2% / 0.85),
+        0 0 24px -4px hsl(var(--l-blue) / 0.2),
+        0 0 0 1px hsl(var(--l-blue) / 0.45);
+    }
+
+    .landing-features-scene[data-features-active] .landing-feature-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      width: 100%;
+    }
+
+    .landing-features-scene[data-features-active] .landing-feature-tag {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      color: hsl(var(--l-blue-bright));
+      background: hsl(var(--l-blue) / 0.12);
+      border: 1px solid hsl(var(--l-blue) / 0.3);
+      padding: 0.25rem 0.625rem;
+      border-radius: 999px;
+    }
+
+    .landing-features-scene[data-features-active] .landing-feature-title {
+      margin: 0 0 0.75rem;
+      font-size: clamp(1.25rem, 1.8vw, 1.5rem);
+      line-height: 1.3;
+      letter-spacing: -0.015em;
+      font-weight: 600;
+      color: hsl(var(--l-text));
+    }
+
+    .landing-features-scene[data-features-active] .landing-feature-desc {
+      margin: 0;
+      color: hsl(var(--l-dim));
+      font-size: clamp(1rem, 0.95rem + 0.2vw, 1.0625rem);
+      line-height: 1.7;
+      max-width: 50rem;
+    }
+  }
+}
+
 /* ── Workflow: numbered steps ───────────────── */
 .landing-workflow {
   list-style: none;
@@ -1379,7 +1530,8 @@
 }
 
 @media (min-width: 64rem) {
-  .landing-features {
+  .landing-features,
+  .landing-features-scene:not([data-features-active]) .landing-features-track-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 3rem;
@@ -1447,7 +1599,8 @@
     padding: 0.875rem;
   }
 
-  .landing-feature {
+  .landing-feature,
+  .landing-feature-panel {
     gap: 1rem;
   }
 }

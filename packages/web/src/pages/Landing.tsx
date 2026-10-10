@@ -48,6 +48,7 @@ export function LandingPage() {
   // CSS properties on the scene element; reduced motion and short/narrow
   // viewports keep the plain stacked flow.
   const sceneRef = useRef<HTMLDivElement>(null);
+  const featuresSceneRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -178,6 +179,78 @@ export function LandingPage() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", sync);
       if (frame) window.cancelAnimationFrame(frame);
+      reset();
+    };
+  }, []);
+
+  // Pinned features storytelling: native document scroll with sticky tracks.
+  // Gated on desktop viewports where feature cards comfortably fit below the
+  // sticky header without clipping. Mobile, short viewports, and reduced motion
+  // keep the plain static flow without extra track heights.
+  useEffect(() => {
+    const scene = featuresSceneRef.current;
+    if (!scene) return;
+
+    const media = window.matchMedia(
+      "(min-width: 64rem) and (min-height: 40rem)"
+    );
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    const reset = () => {
+      scene.removeAttribute("data-features-active");
+      scene.querySelectorAll<HTMLElement>(".landing-feature-track").forEach((track) => {
+        track.style.removeProperty("--feature-stage-height");
+      });
+    };
+
+    const sync = () => {
+      const active = media.matches && !reduceMotion.matches;
+      if (!active) {
+        reset();
+        return;
+      }
+
+      // Measure the enhanced desktop panel, not the smaller fallback layout.
+      scene.setAttribute("data-features-active", "");
+      // Check whether feature panels fit comfortably below the sticky header.
+      // Sticky header height is ~72px (var(--landing-header-h) = 4.5rem).
+      const headerEl = document.querySelector<HTMLElement>(".landing-header");
+      const headerH = headerEl ? headerEl.offsetHeight : 72;
+      const topOffset = headerH + 24; // 24px (1.5rem) margin below header
+      const availableH = window.innerHeight - topOffset - 24; // 24px bottom margin
+
+      const stages = scene.querySelectorAll<HTMLElement>(
+        ".landing-feature-stage"
+      );
+      let maxStageH = 0;
+      stages.forEach((el) => {
+        el.parentElement?.style.setProperty("--feature-stage-height", `${el.offsetHeight}px`);
+        if (el.offsetHeight > maxStageH) {
+          maxStageH = el.offsetHeight;
+        }
+      });
+
+      // Require at least 640px window height and enough room so no card clips
+      if (
+        window.innerHeight < 640 ||
+        (maxStageH > 0 && maxStageH > availableH)
+      ) {
+        reset();
+        return;
+      }
+
+      scene.setAttribute("data-features-active", "");
+    };
+
+    media.addEventListener("change", sync);
+    reduceMotion.addEventListener("change", sync);
+    window.addEventListener("resize", sync);
+    sync();
+
+    return () => {
+      media.removeEventListener("change", sync);
+      reduceMotion.removeEventListener("change", sync);
+      window.removeEventListener("resize", sync);
       reset();
     };
   }, []);
@@ -566,123 +639,217 @@ export function LandingPage() {
               </p>
             </div>
 
-            <ul className="landing-features">
-              <li className="landing-feature">
-                <span className="landing-feature-icon" aria-hidden="true">
-                  <Activity size={20} />
-                </span>
-                <div className="landing-feature-body">
-                  <h3 className="landing-feature-title">
-                    Per-host health you can read at a glance
-                  </h3>
-                  <p className="landing-feature-desc">
-                    Track CPU, memory, disk, system load, network throughput,
-                    and uptime for every server. Bounded per-host history feeds
-                    the overview and metrics views, and missing samples render
-                    as explicit gaps or “unavailable” instead of invented
-                    values.
-                  </p>
-                </div>
-              </li>
-              <li className="landing-feature">
-                <span className="landing-feature-icon" aria-hidden="true">
-                  <Container size={20} />
-                </span>
-                <div className="landing-feature-body">
-                  <h3 className="landing-feature-title">
-                    Docker checks in their own tab
-                  </h3>
-                  <p className="landing-feature-desc">
-                    Container counts stay separate from host health, so a
-                    stopped container is never misread as a down server. Docker
-                    monitoring needs an agent snapshot and stays independent
-                    from management actions; see the{" "}
-                    <a
-                      className="landing-inline-link"
-                      href={SECURITY_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      security model
-                    </a>
-                    .
-                  </p>
-                </div>
-              </li>
-              <li className="landing-feature">
-                <span className="landing-feature-icon" aria-hidden="true">
-                  <TerminalSquare size={20} />
-                </span>
-                <div className="landing-feature-body">
-                  <h3 className="landing-feature-title">
-                    SSH keys, command jobs, and an optional terminal
-                  </h3>
-                  <p className="landing-feature-desc">
-                    Provision and verify an SSH key per server, then run remote
-                    commands as tracked jobs with progress and results.
-                    Real SSH only targets allowed addresses with explicit host
-                    key trust; the web terminal ships disabled and needs
-                    local-mode configuration.
-                  </p>
-                </div>
-              </li>
-              <li className="landing-feature">
-                <span className="landing-feature-icon" aria-hidden="true">
-                  <History size={20} />
-                </span>
-                <div className="landing-feature-body">
-                  <h3 className="landing-feature-title">
-                    History and audit trail for follow-up
-                  </h3>
-                  <p className="landing-feature-desc">
-                    Revisit retained CPU and memory samples, network RX/TX in
-                    bytes per second, job outcomes with failure reasons, and
-                    the audit log when you need to compare what changed.
-                    Stale data keeps an explicit timestamp label.
-                  </p>
-                </div>
-              </li>
-              <li className="landing-feature">
-                <span className="landing-feature-icon" aria-hidden="true">
-                  <Database size={20} />
-                </span>
-                <div className="landing-feature-body">
-                  <h3 className="landing-feature-title">
-                    Your deployment, your data
-                  </h3>
-                  <p className="landing-feature-desc">
-                    Self-host the dashboard and keep data in JSON files or
-                    PostgreSQL (optional TimescaleDB). Switching modes never
-                    converts simulated demo records into real server data.
-                  </p>
-                </div>
-              </li>
-              <li className="landing-feature">
-                <span className="landing-feature-icon" aria-hidden="true">
-                  <ShieldCheck size={20} />
-                </span>
-                <div className="landing-feature-body">
-                  <h3 className="landing-feature-title">
-                    Guardrails are on by default
-                  </h3>
-                  <p className="landing-feature-desc">
-                    Demo mode disables real SSH, private-network targets are
-                    blocked unless explicitly allowed in local mode, and the
-                    systemd agent gets no Docker socket access unless you opt
-                    in. Read the{" "}
-                    <a
-                      className="landing-inline-link"
-                      href={SECURITY_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      security model
-                    </a>{" "}
-                    before opening SSH, terminal, or Docker access.
-                  </p>
-                </div>
-              </li>
-            </ul>
+            <div className="landing-features-scene" ref={featuresSceneRef}>
+              <ul className="landing-features-track-list">
+                <li className="landing-feature-track">
+                  <div className="landing-feature-stage">
+                    <div className="landing-feature-panel landing-feature">
+                      <div className="landing-feature-header">
+                        <span
+                          className="landing-feature-icon"
+                          aria-hidden="true"
+                        >
+                          <Activity size={20} />
+                        </span>
+                        <span
+                          className="landing-feature-tag tnum"
+                          aria-hidden="true"
+                        >
+                          01 / 06
+                        </span>
+                      </div>
+                      <div className="landing-feature-body">
+                        <h3 className="landing-feature-title">
+                          Per-host health you can read at a glance
+                        </h3>
+                        <p className="landing-feature-desc">
+                          Track CPU, memory, disk, system load, network
+                          throughput, and uptime for every server. Bounded
+                          per-host history feeds the overview and metrics views,
+                          and missing samples render as explicit gaps or
+                          “unavailable” instead of invented values.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li className="landing-feature-track">
+                  <div className="landing-feature-stage">
+                    <div className="landing-feature-panel landing-feature">
+                      <div className="landing-feature-header">
+                        <span
+                          className="landing-feature-icon"
+                          aria-hidden="true"
+                        >
+                          <Container size={20} />
+                        </span>
+                        <span
+                          className="landing-feature-tag tnum"
+                          aria-hidden="true"
+                        >
+                          02 / 06
+                        </span>
+                      </div>
+                      <div className="landing-feature-body">
+                        <h3 className="landing-feature-title">
+                          Docker checks in their own tab
+                        </h3>
+                        <p className="landing-feature-desc">
+                          Container counts stay separate from host health, so a
+                          stopped container is never misread as a down server.
+                          Docker monitoring needs an agent snapshot and stays
+                          independent from management actions; see the{" "}
+                          <a
+                            className="landing-inline-link"
+                            href={SECURITY_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            security model
+                          </a>
+                          .
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li className="landing-feature-track">
+                  <div className="landing-feature-stage">
+                    <div className="landing-feature-panel landing-feature">
+                      <div className="landing-feature-header">
+                        <span
+                          className="landing-feature-icon"
+                          aria-hidden="true"
+                        >
+                          <TerminalSquare size={20} />
+                        </span>
+                        <span
+                          className="landing-feature-tag tnum"
+                          aria-hidden="true"
+                        >
+                          03 / 06
+                        </span>
+                      </div>
+                      <div className="landing-feature-body">
+                        <h3 className="landing-feature-title">
+                          SSH keys, command jobs, and an optional terminal
+                        </h3>
+                        <p className="landing-feature-desc">
+                          Provision and verify an SSH key per server, then run
+                          remote commands as tracked jobs with progress and
+                          results. Real SSH only targets allowed addresses with
+                          explicit host key trust; the web terminal ships
+                          disabled and needs local-mode configuration.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li className="landing-feature-track">
+                  <div className="landing-feature-stage">
+                    <div className="landing-feature-panel landing-feature">
+                      <div className="landing-feature-header">
+                        <span
+                          className="landing-feature-icon"
+                          aria-hidden="true"
+                        >
+                          <History size={20} />
+                        </span>
+                        <span
+                          className="landing-feature-tag tnum"
+                          aria-hidden="true"
+                        >
+                          04 / 06
+                        </span>
+                      </div>
+                      <div className="landing-feature-body">
+                        <h3 className="landing-feature-title">
+                          History and audit trail for follow-up
+                        </h3>
+                        <p className="landing-feature-desc">
+                          Revisit retained CPU and memory samples, network RX/TX
+                          in bytes per second, job outcomes with failure
+                          reasons, and the audit log when you need to compare
+                          what changed. Stale data keeps an explicit timestamp
+                          label.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li className="landing-feature-track">
+                  <div className="landing-feature-stage">
+                    <div className="landing-feature-panel landing-feature">
+                      <div className="landing-feature-header">
+                        <span
+                          className="landing-feature-icon"
+                          aria-hidden="true"
+                        >
+                          <Database size={20} />
+                        </span>
+                        <span
+                          className="landing-feature-tag tnum"
+                          aria-hidden="true"
+                        >
+                          05 / 06
+                        </span>
+                      </div>
+                      <div className="landing-feature-body">
+                        <h3 className="landing-feature-title">
+                          Your deployment, your data
+                        </h3>
+                        <p className="landing-feature-desc">
+                          Self-host the dashboard and keep data in JSON files or
+                          PostgreSQL (optional TimescaleDB). Switching modes
+                          never converts simulated demo records into real server
+                          data.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li className="landing-feature-track">
+                  <div className="landing-feature-stage">
+                    <div className="landing-feature-panel landing-feature">
+                      <div className="landing-feature-header">
+                        <span
+                          className="landing-feature-icon"
+                          aria-hidden="true"
+                        >
+                          <ShieldCheck size={20} />
+                        </span>
+                        <span
+                          className="landing-feature-tag tnum"
+                          aria-hidden="true"
+                        >
+                          06 / 06
+                        </span>
+                      </div>
+                      <div className="landing-feature-body">
+                        <h3 className="landing-feature-title">
+                          Guardrails are on by default
+                        </h3>
+                        <p className="landing-feature-desc">
+                          Demo mode disables real SSH, private-network targets
+                          are blocked unless explicitly allowed in local mode,
+                          and the systemd agent gets no Docker socket access
+                          unless you opt in. Read the{" "}
+                          <a
+                            className="landing-inline-link"
+                            href={SECURITY_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            security model
+                          </a>{" "}
+                          before opening SSH, terminal, or Docker access.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              </ul>
+            </div>
           </div>
         </section>
 

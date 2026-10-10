@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — pinned feature scrolling
+
+- Present all six landing capabilities as sequential desktop cards pinned 24px below the header, with native reversible scrolling and numbered feature indicators. Each card holds for 40vh of scrolling (20vh for the final card), then releases before the next section; no wheel interception or new dependencies.
+- Measure the enhanced panels before activation and retain the static feature layout on mobile, short viewports, reduced motion, or when a panel cannot fit. Preserve feature copy, links, anchor clearance, and the existing hero effect.
+
 ## Unreleased — web CI test environment fixes
 
 - Provide the missing `matchMedia` browser API in the shared jsdom setup so the public landing authentication-boundary test can mount its responsive scroll effect without changing production behavior.

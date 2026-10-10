@@ -38,6 +38,8 @@ The English landing at `/` uses its own dark navy/blue marketing palette scoped 
 
 Use capability groups, an audience and non-goals block, a four-part architecture and data-flow overview, a short startup workflow, deployment options with explicit demo/local explanation, native keyboard-operable FAQ disclosures, then deployment actions. The landing offers no dashboard entry and no public demo: primary CTAs link to the deployment docs and secondary CTAs to the GitHub repository. Dashboard access states must retain session authentication and non-sensitive errors. Preserve visible focus, a focusable skip target, sticky-header anchor clearance and reduced-motion support.
 
+The Features section presents all six capabilities as sequential native sticky cards on fitting desktop viewports (at least 64rem wide and 40rem tall). Each card pins 24px beneath the header over a 40vh interval, with a shorter 20vh final interval, then releases naturally; reverse scrolling follows the same layout. Measure the enhanced card height before enabling the tracks. Mobile, short viewports, reduced motion, and panels too tall for the available viewport use the original static layout without extra scroll distance. Preserve every feature's text and inline links; never intercept wheel input.
+
 ## Reusable components
 
 - `components/layout/FleetSidebar.tsx`: fleet navigation from VPS records and metric snapshots; `FleetHostItem.tsx`: route-aware selectable host row.
