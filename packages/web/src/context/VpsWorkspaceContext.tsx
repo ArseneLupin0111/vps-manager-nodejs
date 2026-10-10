@@ -520,6 +520,7 @@ export function VpsWorkspaceDockerPage() {
         <DockerContainerManagementPanel
           vpsId={vps.id}
           enabled={managementEnabled}
+          refreshTick={refreshTick}
         />
         {monitoringEnabled ? (
           <>

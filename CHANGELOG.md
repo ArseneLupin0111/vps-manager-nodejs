@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Docker realtime container logs
+
+- Replace the manual Docker log refresh with on-demand realtime viewing: opening the container log view subscribes automatically to its target's log stream, and the agent opens one Docker `GET /containers/{id}/logs` follow request that returns the last 200 lines and then continues live. There is no snapshot-then-follow pair, so the fixed 200-line tail is read exactly once and never replayed within a subscription.
+- Stream logs over a dedicated SSE endpoint (`docker.logs.state`, `docker.logs.lines`, `docker.logs.closed`) backed by an ephemeral in-RAM broker (`DockerLogsService`, agent routes under `/api/agent/logs`). Log content stays out of `monitoring.snapshot`/`metrics.updated`, dashboards overview data, audit, jobs, metrics, and every JSON/PostgreSQL repository; there is no background collection, indexing, search, or download.
+- Publish the monitoring exception explicitly: this is an approved on-demand exception to the Phase 1 no-log-ingestion rule, bounded at 4 KiB UTF-8 per line, 100 lines or 32 KiB per batch, 15-second keepalive, 30-second claim/ready, 10-second heartbeat grace, and a 2-hour subscription lifetime.
+- Report failures with safe error codes only (`container_not_found`, `target_mismatch`, `daemon_unreachable`, `logs_unavailable`, `invalid_docker_stream`, `agent_unavailable`, `stream_lost`, `slow_consumer`, `session_expired`) and never surface daemon error bodies or log text.
+- Bound the browser buffer to 2,000 displayed lines or 1 MiB, discard the oldest lines with a visible notice, throttle updates to at most one render per 100 ms, and render text-only with auto-scroll that yields to a scrolled-up reader plus a "jump to latest" control.
+- Make reconnect an explicit new subscription: the browser `EventSource` never auto-reconnects, the displayed buffer is cleared, and Docker re-serves the latest 200 lines, so lines emitted during a network gap are not silently replayed.
+- Require a matching rollout: demo mode reports `logsSupported: false` with an explicit reason, the agent log source is Linux-only over `/var/run/docker.sock` and fails explicitly elsewhere, an old agent shows `agent_unavailable` instead of fabricated lines, and an old API stops the agent logs worker without disturbing commands or metrics. Real Docker E2E verification is not claimed here.
+
 ## Unreleased — uniform fleet cards
 
 - Remove the Docker section and monitoring toggle from fleet grid cards so Docker availability no longer changes card layout. Docker monitoring remains available in the individual VPS Docker page; fleet summaries are unchanged.

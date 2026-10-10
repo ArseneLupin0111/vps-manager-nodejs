@@ -687,8 +687,8 @@ export function acknowledgeVpsDockerAlert(id: string, alertId: string) { return 
 //   GET  /api/vps/:id/docker/management/capability
 //   POST /api/vps/:id/docker/management/actions { agentInstanceId, containerKey, action }
 //   GET  /api/vps/:id/docker/management/actions/:operationId
-//   GET  /api/vps/:id/docker/management/logs?agentInstanceId=&containerKey=&lines=
-// All bounds are enforced client-side; logs render as text only.
+// Container logs stream over a separate SSE endpoint owned by
+// lib/docker-logs.ts; nothing here fetches or bounds log content.
 
 export type DockerManagementAction = "start" | "stop" | "restart";
 export type DockerManagementTarget = {
@@ -731,19 +731,60 @@ export type DockerManagementOperation = {
   createdAt: string;
   updatedAt: string;
 };
-export type DockerContainerLogs = {
-  lines: string[];
-  truncated: boolean;
-};
+/**
+ * GETs a JSON payload that is returned bare, with no `{ data }` envelope.
+ *
+ * `request`/`requestEnvelope` unwrap envelopes, so an endpoint whose body is
+ * the resource itself (management capability) would resolve to `undefined`
+ * there. Errors are still raised with the backend's message; the raw body is
+ * only returned on success, and `null` for 204.
+ */
+async function requestRaw<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (options.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
-const DOCKER_MANAGEMENT_LOG_LINE_LIMIT = 200;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      credentials: options.credentials || "same-origin",
+      headers,
+      signal: options.signal || controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(
+        "Request timed out. Check backend connectivity and retry.",
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (response.status === 204) return null as T;
+  const payload = (await response.json().catch(() => ({}))) as ApiResponse<T>;
+  if (!response.ok) {
+    throw new ApiError(
+      payload.error?.message || "Request failed",
+      payload.error,
+    );
+  }
+  return payload as T;
+}
 
 function dockerManagementPath(id: string): string {
   return `${vpsPath(id)}/docker/management`;
 }
 
 export function getVpsDockerManagementCapability(id: string, signal?: AbortSignal) {
-  return request<DockerManagementCapability | null>(
+  // The capability endpoint answers with the resource itself, unwrapped.
+  return requestRaw<DockerManagementCapability | null>(
     `${dockerManagementPath(id)}/capability`,
     { signal },
   );
@@ -778,27 +819,6 @@ export function getVpsDockerManagementOperation(
 ) {
   return request<DockerManagementOperation>(
     `${dockerManagementPath(id)}/actions/${encodeURIComponent(operationId)}`,
-    { signal },
-  );
-}
-
-export function getVpsDockerContainerLogs(
-  id: string,
-  target: DockerManagementTargetInput,
-  lines = 100,
-  signal?: AbortSignal,
-) {
-  const bounded = Math.min(
-    Math.max(Math.floor(lines) || 100, 1),
-    DOCKER_MANAGEMENT_LOG_LINE_LIMIT,
-  );
-  const query = dockerQueryString({
-    agentInstanceId: target.agentInstanceId,
-    containerKey: target.containerKey,
-    lines: bounded,
-  });
-  return request<DockerContainerLogs>(
-    `${dockerManagementPath(id)}/logs${query}`,
     { signal },
   );
 }

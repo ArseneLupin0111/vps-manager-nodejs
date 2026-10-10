@@ -57,6 +57,8 @@ import { TerminalSessionService } from "./terminal/terminal-session.service.js";
 import { DockerMonitoringController } from "./docker/docker-monitoring.controller.js";
 import { DockerManagementController } from "./docker/docker-management.controller.js";
 import { DockerManagementService } from "./docker/docker-management.service.js";
+import { DockerLogsService } from "./docker/docker-logs.service.js";
+import { AgentLogsController } from "./agents/agent-logs.controller.js";
 import { DockerMonitoringService } from "./docker/docker-monitoring.service.js";
 import { DockerMonitoringMaintenanceService } from "./docker/docker-monitoring-maintenance.service.js";
 import { DockerActivityService } from "./docker/docker-activity.service.js";
@@ -168,6 +170,7 @@ export function createAppModule(deps: AppDependencies = {}): DynamicModule {
       AuditController,
       MonitoringController,
       AgentController,
+      AgentLogsController,
       AuthController,
       DockerMonitoringController,
       DockerManagementController,
@@ -275,6 +278,7 @@ export function createAppModule(deps: AppDependencies = {}): DynamicModule {
        DockerActivityService,
        DockerMonitoringService,
        DockerManagementService,
+       DockerLogsService,
        DockerMonitoringMaintenanceService,
        HostKeyPinService,
       {

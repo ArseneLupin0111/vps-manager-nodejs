@@ -104,8 +104,14 @@ export async function createNestApp(
     new ExpressAdapter(server),
     {
       logger: false,
+      rawBody: true,
     },
   );
+  // Raise the shared JSON ceiling so the log broker's own guard answers
+  // oversized batches with 400 body_too_large instead of the default 100kb
+  // parser preempting the route. Must run before init so the default parser
+  // is skipped.
+  nestApp.useBodyParser("json", { limit: "1mb" });
   nestApp.useGlobalFilters(new ApiExceptionFilter());
   await nestApp.init();
   const terminalService = nestApp.get(TerminalSessionService);

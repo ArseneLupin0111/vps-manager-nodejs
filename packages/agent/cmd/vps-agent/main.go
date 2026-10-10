@@ -14,6 +14,7 @@ import (
 	"github.com/vps-manager/agent/internal/commands"
 	"github.com/vps-manager/agent/internal/config"
 	"github.com/vps-manager/agent/internal/geo"
+	"github.com/vps-manager/agent/internal/logs"
 	"github.com/vps-manager/agent/internal/metrics"
 	"github.com/vps-manager/agent/internal/push"
 	"github.com/vps-manager/agent/internal/run"
@@ -159,6 +160,29 @@ func main() {
 						}
 					}
 				}()
+			}
+			// Docker realtime logs run in their own goroutine beside the
+			// command worker: a slow log source can never delay commands or
+			// metrics, and it shares their durable identity and shutdown
+			// context. The source is on-demand only (a viewer subscription
+			// exists); nothing is collected, stored, or replayed in the
+			// background.
+			logsSource, le := logs.NewDockerLogSource("", time.Duration(cfg.RequestTimeoutSeconds)*time.Second)
+			if le != nil {
+				log.Printf("logs worker unavailable: %v", le)
+			} else {
+				logsClient := logs.NewClient(cfg)
+				logsSourcePort := logs.NewDockerSourcePort(logsSource)
+				if logsWorker, lwe := logs.NewClaimWorker(st.InstanceID(), logsClient, logsSourcePort, func(containerKey string) (string, bool) {
+					return resolver(containerKey)
+				}, logs.ClaimWorkerOptions{Logger: log.Default()}); lwe != nil {
+					log.Printf("logs worker unavailable: %v", lwe)
+				} else {
+					go func() {
+						defer logsWorker.Stop()
+						logsWorker.Run(ctx)
+					}()
+				}
 			}
 		}
 	}

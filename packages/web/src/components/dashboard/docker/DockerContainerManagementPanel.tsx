@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/button";
 import {
   AlertDialog,
@@ -14,16 +14,18 @@ import type {
   DockerManagementAction,
   DockerManagementCapability,
   DockerManagementOperation,
+  DockerManagementTarget,
 } from "../../../lib/api";
 import {
-  getVpsDockerContainerLogs,
   getVpsDockerManagementCapability,
   getVpsDockerManagementOperation,
   requestVpsDockerContainerAction,
 } from "../../../lib/api";
-
-const LOG_LINE_HARD_LIMIT = 200;
-const DEFAULT_LOG_LINES = 100;
+import {
+  subscribeDockerContainerLogs,
+  type DockerLogErrorCode,
+  type DockerLogLine,
+} from "../../../lib/docker-logs";
 
 type OperationState = {
   operation: DockerManagementOperation | null;
@@ -32,32 +34,206 @@ type OperationState = {
   error: string | null;
 };
 
+/** One container identity: the pair, never the key alone. */
+type TargetPair = {
+  agentInstanceId: string;
+  containerKey: string;
+};
+
 /**
- * Docker container management (P4, web-only against the planned contract).
+ * Viewer lifecycle. `waiting`/`live` come from the backend; every other
+ * state is the viewer's own accounting of a stream it owns.
+ */
+type StreamStatus =
+  | "waiting"
+  | "live"
+  | "stopped"
+  | "disconnected"
+  | "completed"
+  | "expired"
+  | "failed";
+
+/** Backend window: the source always reopens with this many lines. */
+const BACKEND_TAIL_LINES = 200;
+/** Display buffer bound: dropped from the oldest end, never unbounded. */
+const MAX_DISPLAY_LINES = 2000;
+const MAX_DISPLAY_BYTES = 1024 * 1024;
+/** Pending batches render at most this often, so bursts never thrash React. */
+const DISPLAY_BATCH_MS = 100;
+/** Auto-scroll only holds while the reader is this close to the tail. */
+const AUTO_SCROLL_SLACK_PX = 24;
+
+/** Safe codes only; never echoes a daemon body to the user. */
+const STREAM_ERROR_COPY: Record<DockerLogErrorCode, string> = {
+  container_not_found:
+    "This container is no longer in the server's current inventory.",
+  target_mismatch:
+    "The selected container did not match the server's current inventory.",
+  daemon_unreachable:
+    "The Docker daemon on this server could not be reached.",
+  logs_unavailable:
+    "Container logs are unavailable right now. The policy or source may have changed.",
+  invalid_docker_stream:
+    "The Docker log stream ended in an unusable state.",
+  agent_unavailable:
+    "No agent claimed this stream. The agent may still be starting up.",
+  stream_lost:
+    "The log stream stopped sending data and was closed.",
+  slow_consumer:
+    "The log stream was closed because this browser could not keep up.",
+  session_expired:
+    "Your dashboard session expired, so the log stream was closed.",
+};
+
+function targetPairOf(target: DockerManagementTarget): TargetPair | null {
+  // Targets without an agent instance cannot be streamed: the viewer needs
+  // the pair, and the key alone is never a valid identity.
+  if (typeof target.agentInstanceId !== "string") return null;
+  return {
+    agentInstanceId: target.agentInstanceId,
+    containerKey: target.containerKey,
+  };
+}
+
+function samePair(a: TargetPair | null, b: TargetPair | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.agentInstanceId === b.agentInstanceId && a.containerKey === b.containerKey
+  );
+}
+
+/**
+ * The target this panel may subscribe to right now.
+ *
+ * Derived during render instead of in an effect: a refresh tick that lands
+ * between the capability response and the next paint must not leave an
+ * unsubscribable target on screen, and React re-renders immediately when
+ * the returned pair differs, so the effect below never sees a stale value.
+ */
+function selectScope(
+  targetPair: TargetPair | null,
+  containers: DockerManagementTarget[],
+): TargetPair | null {
+  if (containers.length === 0) return null;
+  // The backend projects snapshots + metrics rows; fixtures can report the
+  // same identity twice (differing only in name/image). Dedupe by pair so
+  // the dropdown never renders duplicate keys for one stream identity.
+  const seen = new Set<string>();
+  const pairs: TargetPair[] = [];
+  for (const target of containers) {
+    const pair = targetPairOf(target);
+    if (pair === null) continue;
+    const key = pairValue(pair);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push(pair);
+  }
+  if (targetPair !== null && pairs.some((pair) => samePair(pair, targetPair))) {
+    return targetPair;
+  }
+  return pairs.length > 0 ? pairs[0] : null;
+}
+
+function pairValue(pair: TargetPair): string {
+  // The opaque charset has no separator characters, so this is unambiguous.
+  return `${pair.agentInstanceId}::${pair.containerKey}`;
+}
+
+function parsePairValue(value: string): TargetPair | null {
+  const separator = value.indexOf("::");
+  if (separator <= 0) return null;
+  const agentInstanceId = value.slice(0, separator);
+  const containerKey = value.slice(separator + 2);
+  if (!agentInstanceId || !containerKey) return null;
+  return { agentInstanceId, containerKey };
+}
+
+const byteCounter = new TextEncoder();
+
+/**
+ * The viewer buffer and the byte total that bounds it. The byte total is
+ * tracked on append so a render never re-encodes the whole window just to
+ * print a count, and `discarded` rides along so the notice is published
+ * with exactly the lines it describes.
+ */
+type DisplayBuffer = {
+  lines: DockerLogLine[];
+  bytes: number;
+  /** Rendered line count, kept next to the byte total it shares a bound with. */
+  count: number;
+  discarded: boolean;
+};
+
+/**
+ * Shared empty buffer. Lines are never mutated in place — every append
+ * builds a new array — so one constant can back every reset.
+ */
+const EMPTY_BUFFER: DisplayBuffer = { lines: [], bytes: 0, count: 0, discarded: false };
+
+/**
+ * Appends to the buffer and drops the globally oldest lines until both
+ * bounds hold. Eviction runs on the logical stream, so what the reader can
+ * ever see is decided by delivery order and never by when a render
+ * happens. A single line longer than the byte bound is kept rather than
+ * dropping everything; the wire contract caps lines far below that bound.
+ */
+function appendBounded(
+  buffer: DisplayBuffer,
+  incoming: DockerLogLine[],
+): DisplayBuffer {
+  const lines = buffer.lines.concat(incoming);
+  let bytes = buffer.bytes;
+  for (const line of incoming) bytes += byteCounter.encode(line.text).length;
+  let start = 0;
+  while (
+    start < lines.length &&
+    (lines.length - start > MAX_DISPLAY_LINES || bytes > MAX_DISPLAY_BYTES)
+  ) {
+    bytes -= byteCounter.encode(lines[start].text).length;
+    start += 1;
+  }
+  // The notice is sticky: once lines have been discarded, later appends
+  // that do not evict must not make the warning disappear.
+  const kept = start === 0 ? lines : lines.slice(start);
+  return {
+    lines: kept,
+    bytes,
+    count: kept.length,
+    discarded: buffer.discarded || start > 0,
+  };
+}
+
+/**
+ * Docker container management (P4) with a realtime log viewer.
  *
  * - Capability/target display is explicit; controls stay disabled until both
  *   capability and a container target resolve.
- * - Log-lines is a separate setting from history/event pagination limits.
  * - Start/stop/restart always confirm via AlertDialog; Cancel closes the
  *   dialog and makes no API call.
  * - No optimistic state: container rows are never edited locally; only the
  *   operation result/status is shown.
- * - Logs load only on manual Load/Refresh clicks (never from SSE/polling)
- *   and render as text only (React escaping; no inner HTML).
+ * - Logs are an ephemeral SSE viewer: the last 200 lines, then live. The
+ *   viewer owns its buffer, its reconnect, and its scroll position.
  */
 export function DockerContainerManagementPanel({
   vpsId,
   enabled,
+  refreshTick = 0,
 }: {
   vpsId: string;
   enabled: boolean;
+  /** Capability reload tick from the workspace monitoring refresh. */
+  refreshTick?: number;
 }) {
   const [capability, setCapability] =
     useState<DockerManagementCapability | null>(null);
-  const [capabilityLoading, setCapabilityLoading] = useState(false);
+  // Initialize to true when enabled: the first paint happens before the
+  // effect fires, and showing "status unknown" during that single paint
+  // caused synchronous tests and fast renders to observe the error fallback.
+  const [capabilityLoading, setCapabilityLoading] = useState(enabled);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const [capabilityRetry, setCapabilityRetry] = useState(0);
-  const [targetKey, setTargetKey] = useState<string | null>(null);
+  const [targetPair, setTargetPair] = useState<TargetPair | null>(null);
   const [pendingAction, setPendingAction] =
     useState<DockerManagementAction | null>(null);
   const [operationState, setOperationState] = useState<OperationState>({
@@ -67,18 +243,45 @@ export function DockerContainerManagementPanel({
     error: null,
   });
 
-  const [logLinesSetting, setLogLinesSetting] =
-    useState<number>(DEFAULT_LOG_LINES);
-  const [logLines, setLogLines] = useState<string[]>([]);
-  const [logsTruncated, setLogsTruncated] = useState(false);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [logsError, setLogsError] = useState<string | null>(null);
-  const logsAbortRef = useRef<AbortController | null>(null);
-  const containers = capability?.targets ?? [];
-  const selected = containers.find((item) => item.containerKey === targetKey) ?? null;
-  const agentInstanceId = selected?.agentInstanceId;
+  // ── Log viewer state ───────────────────────────────────────────────
+  const [streamStatus, setStreamStatus] = useState<StreamStatus | null>(null);
+  const [streamErrorCode, setStreamErrorCode] =
+    useState<DockerLogErrorCode | null>(null);
+  const [reconnectCount, setReconnectCount] = useState(0);
+  /** Stop keeps the buffer and closes the source; reconnect reopens it. */
+  const [streamEnabled, setStreamEnabled] = useState(true);
 
-  // ── Capability load (manual retry only; never driven by SSE) ──────
+  const containers = capability?.targets ?? [];
+  const selected = targetPair
+    ? (containers.find(
+        (item) =>
+          item.agentInstanceId === targetPair.agentInstanceId &&
+          item.containerKey === targetPair.containerKey,
+      ) ?? null)
+    : null;
+  const logsSupported = capability?.logsSupported === true;
+  const canStream = enabled && logsSupported && streamEnabled && selected !== null;
+
+  const preRef = useRef<HTMLPreElement | null>(null);
+  /**
+   * The one authoritative buffer: the staged lines and the byte total that
+   * bounds them. Appends land here immediately and are bounded here
+   * immediately, so there is never a second staging queue that could hold
+   * lines the display bound already discarded.
+   */
+  const bufferRef = useRef<DisplayBuffer>(EMPTY_BUFFER);
+  /** Lines as last published to React; `null` until the first publish. */
+  const [published, setPublished] = useState<DisplayBuffer | null>(null);
+  const flushTimerRef = useRef<number | null>(null);
+  /**
+   * Reader was at the tail before this append. A ref guards the layout
+   * effect without re-subscribing it; the state copy drives the
+   * "Jump to latest" affordance.
+   */
+  const stickToTailRef = useRef(true);
+  const [atTail, setAtTail] = useState(true);
+
+  // ── Capability load (retry + monitoring refresh tick) ──────────────
   useEffect(() => {
     if (!enabled) {
       setCapability(null);
@@ -88,7 +291,11 @@ export function DockerContainerManagementPanel({
     }
     let cancelled = false;
     const controller = new AbortController();
-    setCapabilityLoading(true);
+    // The first load has nothing to show yet, so it gates the viewer. A
+    // refresh (tick or retry) keeps whatever is already rendered: swapping
+    // the log viewport out for a loading branch would remount the <pre>
+    // and throw away the reader's scroll position mid-stream.
+    setCapabilityLoading(capability === null);
     setCapabilityError(null);
     getVpsDockerManagementCapability(vpsId, controller.signal)
       .then((result) => {
@@ -98,7 +305,9 @@ export function DockerContainerManagementPanel({
       .catch((err) => {
         if (cancelled) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setCapability(null);
+        // A refresh failure must not wipe a working viewer: the last good
+        // capability stays until the next tick supplies a replacement.
+        if (capability === null) setCapability(null);
         setCapabilityError(
           err instanceof Error
             ? err.message
@@ -112,12 +321,19 @@ export function DockerContainerManagementPanel({
       cancelled = true;
       controller.abort();
     };
-  }, [vpsId, enabled, capabilityRetry]);
+  }, [vpsId, enabled, capabilityRetry, refreshTick]);
 
-  // ── Target + log cleanup on scope change ───────────────────────────
+  // ── Target selection: always a live (agentInstanceId, containerKey) pair
+  // A pair that left the inventory is replaced by the first valid target,
+  // never silently kept, and never resolved by key alone.
+  const scopedPair = selectScope(targetPair, containers);
+  if (scopedPair !== targetPair) {
+    setTargetPair(scopedPair);
+  }
+
+  // Scope changes never leak operation status into another target.
   useEffect(() => {
     if (!enabled) {
-      setTargetKey(null);
       setPendingAction(null);
       setOperationState({
         operation: null,
@@ -125,46 +341,135 @@ export function DockerContainerManagementPanel({
         requestBusy: false,
         error: null,
       });
-      setLogLines([]);
-      setLogsTruncated(false);
-      setLogsError(null);
-      logsAbortRef.current?.abort();
-      logsAbortRef.current = null;
-      return;
     }
-    if (targetKey && !containers.some((item) => item.containerKey === targetKey)) {
-      setTargetKey(null);
-      setPendingAction(null);
-      setLogLines([]);
-      setLogsTruncated(false);
-      setLogsError(null);
-      logsAbortRef.current?.abort();
-      logsAbortRef.current = null;
-    }
-  }, [enabled, targetKey, capability]);
+  }, [enabled]);
 
-  useEffect(() => {
-    return () => {
-      logsAbortRef.current?.abort();
-      logsAbortRef.current = null;
-    };
+  // ── Viewer buffer: one authoritative, bounded ref plus a render tick ─
+  // The single bounded buffer is the only source of truth. Appends evict
+  // the oldest lines of the logical stream immediately — eviction decides
+  // what is real, so it must not depend on when a render happens, and there
+  // must not be a second queue whose own budget evicts lines before they
+  // were ever shown.
+  //
+  // React state is only a publication of that buffer: at most one render
+  // per DISPLAY_BATCH_MS, so a burst never thrashes the viewport. The
+  // discard notice travels inside the published buffer, so it can never
+  // describe a different window than the lines next to it.
+  const publishBuffer = useCallback(() => {
+    flushTimerRef.current = null;
+    // A timer is armed only after an append and cleared on every scope
+    // reset, so a fire always has a fresh array to publish. React bails
+    // out when the reference is unchanged, so an empty publish is free.
+    setPublished(bufferRef.current);
   }, []);
 
-  const effectiveMaxLines = Math.min(
-    LOG_LINE_HARD_LIMIT,
-    capability?.maxLogLines && capability.maxLogLines > 0
-      ? capability.maxLogLines
-      : LOG_LINE_HARD_LIMIT,
+  const appendLines = useCallback(
+    (incoming: DockerLogLine[]) => {
+      if (incoming.length === 0) return;
+      // Bounded on the logical stream the moment the lines arrive; the
+      // flush below only decides when React sees the same array.
+      bufferRef.current = appendBounded(bufferRef.current, incoming);
+      if (flushTimerRef.current !== null) return;
+      flushTimerRef.current = window.setTimeout(publishBuffer, DISPLAY_BATCH_MS);
+    },
+    [publishBuffer],
   );
-  const boundedLogLines = Math.min(
-    Math.max(Math.floor(logLinesSetting) || DEFAULT_LOG_LINES, 1),
-    effectiveMaxLines,
-  );
-  const visibleOperation =
-    operationState.operation &&
-    operationState.operation.target.containerKey === targetKey
-      ? operationState.operation
-      : null;
+
+  /**
+   * Drops the whole buffer and any timer armed against it. Used by a scope
+   * change (the old window must not survive into a new target) and by
+   * Reconnect (a fresh window reopens from the backend tail), and served to
+   * Clear so "clear" only drops the display buffer: the subscription is
+   * untouched, so lines emitted after it still arrive and append to the
+   * emptied buffer.
+   */
+  const resetBuffer = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    bufferRef.current = EMPTY_BUFFER;
+    setPublished(null);
+  }, []);
+
+  // ── Scope reset: independent of subscription eligibility ───────────
+  // Runs for every scope change, including while the viewer is stopped:
+  // the previous container's buffer must never stay on screen under a
+  // new target label, and a new pair must always auto-subscribe.
+  useEffect(() => {
+    resetBuffer();
+    setStreamStatus("waiting");
+    setStreamErrorCode(null);
+    setStreamEnabled(true);
+    stickToTailRef.current = true;
+    setAtTail(true);
+  }, [vpsId, selected?.agentInstanceId, selected?.containerKey, reconnectCount]);
+
+  // ── Ephemeral viewer: primitive deps only ───────────────────────────
+  // The capability object and the refresh tick are deliberately absent: a
+  // capability reload that keeps the same target must not reopen a stream,
+  // and a refresh tick must never tear down a live subscription.
+  useEffect(() => {
+    // Narrowed here rather than cast: a target that lost its agent instance
+    // mid-refresh must not open a viewer with an undefined identity.
+    const agentInstanceId = selected?.agentInstanceId;
+    if (!canStream || !selected || typeof agentInstanceId !== "string") return;
+    const pair: TargetPair = {
+      agentInstanceId,
+      containerKey: selected.containerKey,
+    };
+
+    let disposed = false;
+
+    const unsubscribe = subscribeDockerContainerLogs(vpsId, pair, {
+      onState: (status) => {
+        if (disposed) return;
+        setStreamStatus(status);
+      },
+      onLines: (lines) => {
+        if (disposed) return;
+        appendLines(lines);
+      },
+      onClosed: (event) => {
+        if (disposed) return;
+        setStreamStatus(
+          event.reason === "completed"
+            ? "completed"
+            : event.reason === "expired"
+              ? "expired"
+              : "failed",
+        );
+        setStreamErrorCode(event.errorCode ?? null);
+      },
+      onError: () => {
+        if (disposed) return;
+        setStreamStatus("disconnected");
+      },
+    });
+
+    return () => {
+      disposed = true;
+      // Tear down the source, not the buffer: Stop keeps what the reader
+      // has on screen, and the scope reset below owns clearing it. Only the
+      // pending publish is dropped, so a timer armed for the retired
+      // viewer cannot publish into the next one.
+      if (flushTimerRef.current !== null) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vpsId, canStream, selected?.agentInstanceId, selected?.containerKey, reconnectCount]);
+
+  // Auto-scroll only while the reader stayed at the tail before the append.
+  useLayoutEffect(() => {
+    const element = preRef.current;
+    if (!element || !stickToTailRef.current) return;
+    element.scrollTop = element.scrollHeight;
+  }, [published]);
+
+  const buffer = published ?? EMPTY_BUFFER;
 
   const confirmAction = async () => {
     if (!pendingAction || !selected) return;
@@ -178,7 +483,10 @@ export function DockerContainerManagementPanel({
     try {
       const result = await requestVpsDockerContainerAction(
         vpsId,
-        { agentInstanceId, containerKey: selected.containerKey },
+        {
+          agentInstanceId: selected.agentInstanceId,
+          containerKey: selected.containerKey,
+        },
         pendingAction,
       );
       setOperationState({
@@ -197,7 +505,7 @@ export function DockerContainerManagementPanel({
             : "Unable to start this container operation.",
       }));
     } finally {
-      // No optimistic container update; dialog closes and status/logs are
+      // No optimistic container update; dialog closes and status is
       // checked manually below.
       setPendingAction(null);
     }
@@ -227,43 +535,24 @@ export function DockerContainerManagementPanel({
     }
   };
 
-  const loadLogs = async () => {
-    if (!selected || !agentInstanceId || logsLoading) return;
-    logsAbortRef.current?.abort();
-    const controller = new AbortController();
-    logsAbortRef.current = controller;
-    setLogsLoading(true);
-    setLogsError(null);
-    try {
-      const result = await getVpsDockerContainerLogs(
-        vpsId,
-        { agentInstanceId, containerKey: selected.containerKey },
-        boundedLogLines,
-        controller.signal,
-      );
-      if (controller.signal.aborted) return;
-      // Text only: rendered via React text content below, never HTML.
-      setLogLines(result.lines.slice(0, boundedLogLines));
-      setLogsTruncated(result.truncated);
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      setLogsError(
-        err instanceof Error ? err.message : "Container logs are unavailable.",
-      );
-    } finally {
-      if (!controller.signal.aborted) setLogsLoading(false);
-      if (logsAbortRef.current === controller) logsAbortRef.current = null;
-    }
+  const stopStream = () => {
+    // The subscription cleanup closes the source; status is local only.
+    setStreamEnabled(false);
+    setStreamErrorCode(null);
+    setStreamStatus("stopped");
   };
 
-  const clearLogs = () => {
-    logsAbortRef.current?.abort();
-    logsAbortRef.current = null;
-    setLogsLoading(false);
-    setLogLines([]);
-    setLogsTruncated(false);
-    setLogsError(null);
+  const reconnectStream = () => {
+    setStreamEnabled(true);
+    setStreamErrorCode(null);
+    setReconnectCount((n) => n + 1);
+  };
+
+  const jumpToLatest = () => {
+    const element = preRef.current;
+    stickToTailRef.current = true;
+    setAtTail(true);
+    if (element) element.scrollTop = element.scrollHeight;
   };
 
   if (!enabled) {
@@ -354,9 +643,32 @@ export function DockerContainerManagementPanel({
     );
   }
 
-  const actionDisabled =
-    !selected || operationState.requestBusy || operationState.checking;
-  const actions: DockerManagementAction[] = ["start", "stop", "restart"];
+  const visibleOperation =
+    operationState.operation &&
+    operationState.operation.target.containerKey ===
+      targetPair?.containerKey &&
+    operationState.operation.target.agentInstanceId ===
+      targetPair?.agentInstanceId
+      ? operationState.operation
+      : null;
+
+  const streamOpen = streamStatus === "waiting" || streamStatus === "live";
+  const streamLabel =
+    streamStatus === "waiting"
+      ? "Waiting for agent"
+      : streamStatus === "live"
+        ? "Live"
+        : streamStatus === "stopped"
+          ? "Stopped"
+          : streamStatus === "disconnected"
+            ? "Disconnected"
+            : streamStatus === "completed"
+              ? "Completed"
+              : streamStatus === "expired"
+                ? "Expired"
+                : streamStatus === "failed"
+                  ? "Failed"
+                  : "Idle";
 
   return (
     <section
@@ -367,250 +679,346 @@ export function DockerContainerManagementPanel({
         <h3 className="text-[14px] font-semibold">Container management</h3>
         <p className="mt-0.5 text-[12px] text-dim">
           Capability: {capability.actions.join(", ") || "no actions"} · logs{" "}
-          {capability.logsSupported ? "supported" : "not supported"} (max{" "}
-          {effectiveMaxLines} lines). Target a single container below; every
-          action asks for confirmation first.
+          {logsSupported ? "supported" : "not supported"} (last{" "}
+          {BACKEND_TAIL_LINES} lines, then live). Target a single container
+          below; every action asks for confirmation first.
         </p>
       </header>
 
       <div className="p-4">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="min-w-0">
-          <label
-            className="mb-1 block text-[11px] text-dim"
-            htmlFor={`docker-management-target-${vpsId}`}
-          >
-            Target container
-          </label>
-          <select
-            id={`docker-management-target-${vpsId}`}
-            value={targetKey ?? ""}
-            onChange={(event) =>
-              setTargetKey(event.target.value || null)
-            }
-            className="h-8 w-full border border-line bg-ink px-2 text-[12px] text-text focus:border-signal focus:outline-none"
-          >
-            <option value="">Select a container…</option>
-            {containers.map((container) => (
-              <option key={container.containerKey} value={container.containerKey}>
-                {container.name} · {container.state ?? "unknown"}
-              </option>
-            ))}
-          </select>
-          {selected ? (
-            <p className="mt-1 truncate text-[11px] text-dim">
-              Target: {selected.name} · key {selected.containerKey} ·{" "}
-              {selected.image} · {selected.state}
-            </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-w-0">
+            <label
+              className="mb-1 block text-[11px] text-dim"
+              htmlFor={`docker-management-target-${vpsId}`}
+            >
+              Target container
+            </label>
+            <select
+              id={`docker-management-target-${vpsId}`}
+              value={targetPair ? pairValue(targetPair) : ""}
+              onChange={(event) => {
+                const next = parsePairValue(event.target.value);
+                setTargetPair(next);
+              }}
+              className="h-8 w-full border border-line bg-ink px-2 text-[12px] text-text focus:border-signal focus:outline-none"
+            >
+              {targetPair === null ? (
+                <option value="">No container reported…</option>
+              ) : null}
+              {(() => {
+                const seen = new Set<string>();
+                const unique: TargetPair[] = [];
+                for (const item of containers) {
+                  const pair = targetPairOf(item);
+                  if (pair === null) continue;
+                  const key = pairValue(pair);
+                  if (seen.has(key)) continue;
+                  seen.add(key);
+                  unique.push(pair);
+                }
+                return unique.map((pair) => (
+                  <option key={pairValue(pair)} value={pairValue(pair)}>
+                    {containers.find(
+                      (item) =>
+                        item.agentInstanceId === pair.agentInstanceId &&
+                        item.containerKey === pair.containerKey,
+                    )?.name ?? pair.containerKey}{" "}
+                    ·{" "}
+                    {containers.find(
+                      (item) =>
+                        item.agentInstanceId === pair.agentInstanceId &&
+                        item.containerKey === pair.containerKey,
+                    )?.state ?? "unknown"}
+                  </option>
+                ));
+              })()}
+            </select>
+            {selected ? (
+              <p className="mt-1 truncate text-[11px] text-dim">
+                Target: {selected.name} · key {selected.containerKey} ·{" "}
+                {selected.image} · {selected.state}
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px] text-dim">
+                No container has been reported for this server yet, so there is
+                nothing to stream.
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            {(["start", "stop", "restart"] as DockerManagementAction[]).map(
+              (action) => (
+                <Button
+                  key={action}
+                  type="button"
+                  size="sm"
+                  variant={action === "stop" ? "destructive" : "secondary"}
+                  className="capitalize"
+                  disabled={
+                    !selected ||
+                    operationState.requestBusy ||
+                    operationState.checking ||
+                    !capability.actions.includes(action)
+                  }
+                  onClick={() => setPendingAction(action)}
+                >
+                  {action}
+                </Button>
+              ),
+            )}
+          </div>
+        </div>
+
+        <div
+          aria-live="polite"
+          className="mt-3 border border-line bg-raised px-3 py-2"
+        >
+          <p className="text-[11px] font-medium text-text">
+            Operation status:{" "}
+            {operationState.error && !visibleOperation
+              ? "unknown"
+              : (visibleOperation?.status ?? "none")}
+          </p>
+          {visibleOperation ? (
+            <>
+              <p className="mt-1 text-[11px] text-dim">
+                {visibleOperation.action} ·{" "}
+                {visibleOperation.target.containerKey} · requested{" "}
+                {new Date(visibleOperation.createdAt).toLocaleString()}
+                {visibleOperation.updatedAt
+                  ? ` · updated ${new Date(visibleOperation.updatedAt).toLocaleString()}`
+                  : ""}
+              </p>
+              {visibleOperation.status === "failed" &&
+              visibleOperation.result?.message ? (
+                <p role="alert" className="mt-1 text-[11px] text-crit">
+                  {visibleOperation.result.message}
+                </p>
+              ) : null}
+              {visibleOperation.cancelReason ? (
+                <p className="mt-1 text-[11px] text-dim">
+                  Cancel reason: {visibleOperation.cancelReason}
+                </p>
+              ) : null}
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={operationState.checking}
+                  onClick={() => void checkOperationStatus()}
+                >
+                  {operationState.checking
+                    ? "Checking…"
+                    : "Check status manually"}
+                </Button>
+              </div>
+            </>
           ) : (
             <p className="mt-1 text-[11px] text-dim">
-              Select a target container to enable start, stop, and restart.
+              No operation for this target yet. Confirm an action above, then
+              check status manually. Live updates never change this status
+              automatically.
             </p>
           )}
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          {actions.map((action) => (
-            <Button
-              key={action}
-              type="button"
-              size="sm"
-              variant={action === "stop" ? "destructive" : "secondary"}
-              className="capitalize"
-              disabled={
-                actionDisabled || !capability.actions.includes(action)
-              }
-              onClick={() => setPendingAction(action)}
-            >
-              {action}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      <div
-        aria-live="polite"
-        className="mt-3 border border-line bg-raised px-3 py-2"
-      >
-        <p className="text-[11px] font-medium text-text">
-          Operation status:{" "}
-          {operationState.error && !visibleOperation
-            ? "unknown"
-            : (visibleOperation?.status ?? "none")}
-        </p>
-        {visibleOperation ? (
-          <>
-            <p className="mt-1 text-[11px] text-dim">
-              {visibleOperation.action} · {visibleOperation.target.containerKey} ·
-              requested {new Date(visibleOperation.createdAt).toLocaleString()}
-              {visibleOperation.updatedAt
-                ? ` · updated ${new Date(visibleOperation.updatedAt).toLocaleString()}`
-                : ""}
+          {operationState.error ? (
+            <p role="alert" className="mt-1 text-[11px] text-crit">
+              {operationState.error}
             </p>
-            {visibleOperation.status === "failed" &&
-            visibleOperation.result?.message ? (
-              <p role="alert" className="mt-1 text-[11px] text-crit">
-                {visibleOperation.result.message}
-              </p>
-            ) : null}
-            {visibleOperation.cancelReason ? (
-              <p className="mt-1 text-[11px] text-dim">
-                Cancel reason: {visibleOperation.cancelReason}
-              </p>
-            ) : null}
-            <div className="mt-2 flex flex-wrap gap-2">
+          ) : null}
+        </div>
+
+        {/* ── Realtime log viewer ──────────────────────────────────── */}
+        <div className="mt-3 border-t border-line pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-[11px] font-medium text-text">
+              Container logs
+            </h4>
+            <span
+              className="tnum text-[11px] text-dim"
+              data-testid="docker-log-stream-status"
+            >
+              {logsSupported ? streamLabel : "Not supported"}
+            </span>
+            <div className="ml-auto flex flex-wrap gap-2">
+              {streamOpen ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={stopStream}
+                >
+                  Stop
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={!selected}
+                  onClick={reconnectStream}
+                >
+                  Reconnect
+                </Button>
+              )}
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
-                disabled={operationState.checking}
-                onClick={() => void checkOperationStatus()}
+                variant="ghost"
+                disabled={buffer.count === 0}
+                onClick={resetBuffer}
               >
-                {operationState.checking
-                  ? "Checking…"
-                  : "Check status manually"}
+                Clear
               </Button>
+              {buffer.count > 0 && !atTail ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={jumpToLatest}
+                >
+                  Jump to latest
+                </Button>
+              ) : null}
             </div>
-          </>
-        ) : (
-          <p className="mt-1 text-[11px] text-dim">
-            No operation for this target yet. Confirm an action above, then
-            check status manually. Live updates never change this status
-            automatically.
-          </p>
-        )}
-        {operationState.error ? (
-          <p role="alert" className="mt-1 text-[11px] text-crit">
-            {operationState.error}
-          </p>
-        ) : null}
-      </div>
+          </div>
 
-      <div className="mt-3 border-t border-line pt-3">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-end">
-          <div>
-            <label
-              className="mb-1 block text-[11px] text-dim"
-              htmlFor={`docker-management-lines-${vpsId}`}
-            >
-              Log lines (separate setting, 1–{effectiveMaxLines})
-            </label>
-            <input
-              id={`docker-management-lines-${vpsId}`}
-              type="number"
-              min={1}
-              max={effectiveMaxLines}
-              value={logLinesSetting}
-              onChange={(event) =>
-                setLogLinesSetting(Number(event.target.value))
-              }
-              className="tnum h-8 w-full border border-line bg-ink px-2 text-[12px] text-text focus:border-signal focus:outline-none"
-            />
+          <div
+            aria-live="polite"
+            className="mt-2 text-[11px] text-dim"
+            data-testid="docker-log-status"
+          >
+            {streamLabel}
+            {logsSupported && streamStatus === "live" && buffer.count === 0
+              ? " · No logs yet"
+              : ""}
           </div>
-          <div className="flex flex-wrap gap-2 sm:justify-end">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              disabled={
-                !selected ||
-                !capability.logsSupported ||
-                logsLoading
-              }
-              onClick={() => void loadLogs()}
-            >
-              {logsLoading
-                ? "Loading logs…"
-                : logLines.length
-                  ? "Refresh logs manually"
-                  : "Load logs manually"}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={!logLines.length && !logsError}
-              onClick={clearLogs}
-            >
-              Clear
-            </Button>
-          </div>
-        </div>
-        {!capability.logsSupported ? (
-          <p className="mt-2 text-[11px] text-dim">
-            Log retrieval is not supported by this agent.
-          </p>
-        ) : null}
-        {logsError ? (
-          <p role="alert" className="mt-2 text-[11px] text-crit">
-            {logsError}
-          </p>
-        ) : null}
-        {logLines.length ? (
-          <>
+
+          {!logsSupported ? (
             <p className="mt-2 text-[11px] text-dim">
-              Showing {logLines.length} bounded lines
-              {logsTruncated ? " · output was truncated" : ""}. Text only.
+              Realtime log retrieval is not supported by this agent.
             </p>
-            <pre className="tnum mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words border border-line bg-ink p-4 text-[12px] leading-5 text-dim">
-              {logLines.join("\n")}
-            </pre>
-          </>
-        ) : (
-          <p className="mt-2 text-[11px] text-dim">
-            Logs load only when requested and never refresh automatically.
-          </p>
-        )}
-      </div>
-
-      <AlertDialog
-        open={pendingAction !== null}
-        onOpenChange={(open) => {
-          // Closing the dialog is always a local cancel with no API call.
-          if (!open && !operationState.requestBusy) setPendingAction(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pendingAction ? (
-                <>
-                  {pendingAction === "start"
-                    ? "Start"
-                    : pendingAction === "stop"
-                      ? "Stop"
-                      : "Restart"}{" "}
-                  container “{selected?.name ?? selected?.containerKey}”?
-                </>
+          ) : selected === null ? (
+            <p className="mt-2 text-[11px] text-dim">
+              No container has been reported for this server, so no log stream
+              is open.
+            </p>
+          ) : (
+            <>
+              <p className="mt-2 text-[11px] text-dim">
+                {buffer.count} line{buffer.count === 1 ? "" : "s"} ·{" "}
+                {buffer.bytes} bytes shown · text only. This window reopens
+                with the last {BACKEND_TAIL_LINES} lines on every reconnect.
+              </p>
+              {buffer.discarded ? (
+                <p className="mt-1 text-[11px] text-dim">
+                  Older displayed lines were discarded.
+                </p>
+              ) : null}
+              {streamStatus === "failed" || streamStatus === "disconnected" ? (
+                <p role="alert" className="mt-1 text-[11px] text-crit">
+                  {streamStatus === "disconnected"
+                    ? "The log stream disconnected. Reconnect to open a new window."
+                    : (streamErrorCode
+                        ? STREAM_ERROR_COPY[streamErrorCode]
+                        : "The log stream failed. Reconnect to try again.")}
+                </p>
+              ) : null}
+              {streamStatus === "expired" ? (
+                <p className="mt-1 text-[11px] text-dim">
+                  This log window expired. Reconnect for a new one.
+                </p>
+              ) : null}
+              {buffer.count > 0 ? (
+                <pre
+                  ref={preRef}
+                  data-testid="docker-log-body"
+                  className="tnum mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words border border-line bg-ink p-4 text-[12px] leading-5 text-dim"
+                  onScroll={(event) => {
+                    const element = event.currentTarget;
+                    // Auto-scroll only holds while the reader stayed at the
+                    // tail: scrolling up pins the view instead of yanking.
+                    const nearTail =
+                      element.scrollHeight -
+                        element.scrollTop -
+                        element.clientHeight <=
+                      AUTO_SCROLL_SLACK_PX;
+                    stickToTailRef.current = nearTail;
+                    if (nearTail !== atTail) setAtTail(nearTail);
+                  }}
+                >
+                  {buffer.lines
+                    .map((line) =>
+                      line.truncated ? `${line.text} [line truncated]` : line.text,
+                    )
+                    .join("\n")}
+                </pre>
               ) : (
-                "Confirm container action"
+                <p className="mt-2 text-[11px] text-dim">
+                  {streamStatus === "waiting"
+                    ? "Waiting for the agent to claim this stream…"
+                    : streamStatus === "live"
+                      ? "No logs yet from this container."
+                      : streamOpen
+                        ? "Waiting for the agent to claim this stream…"
+                        : "No lines buffered. Reconnect to open a new window."}
+                </p>
               )}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This targets {selected?.name ?? "the selected container"}{" "}
-              (key {selected?.containerKey ?? "—"}) on this server. The action is sent
-              once on confirmation; container state below is not updated
-              optimistically. Check operation status manually afterwards.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={
-                !pendingAction ||
-                !selected ||
-                operationState.requestBusy
-              }
-              onClick={() => void confirmAction()}
-            >
-              {operationState.requestBusy
-                ? "Sending…"
-                : pendingAction
-                  ? `Confirm ${pendingAction}`
-                  : "Confirm"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </>
+          )}
+        </div>
+
+        <AlertDialog
+          open={pendingAction !== null}
+          onOpenChange={(open) => {
+            // Closing the dialog is always a local cancel with no API call.
+            if (!open && !operationState.requestBusy) setPendingAction(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {pendingAction ? (
+                  <>
+                    {pendingAction === "start"
+                      ? "Start"
+                      : pendingAction === "stop"
+                        ? "Stop"
+                        : "Restart"}{" "}
+                    container “{selected?.name ?? selected?.containerKey}”?
+                  </>
+                ) : (
+                  "Confirm container action"
+                )}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This targets {selected?.name ?? "the selected container"} (key{" "}
+                {selected?.containerKey ?? "—"}) on this server. The action is
+                sent once on confirmation; container state below is not
+                updated optimistically. Check operation status manually
+                afterwards.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={
+                  !pendingAction ||
+                  !selected ||
+                  operationState.requestBusy
+                }
+                onClick={() => void confirmAction()}
+              >
+                {operationState.requestBusy
+                  ? "Sending…"
+                  : pendingAction
+                    ? `Confirm ${pendingAction}`
+                    : "Confirm"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </section>
   );

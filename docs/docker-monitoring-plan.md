@@ -19,7 +19,6 @@ The result must work with both repository modes selected by `STORAGE_DRIVER` (`j
 Phase 1 does **not** add:
 
 - container start, stop, restart, pause, remove, exec, or any other Docker mutation;
-- container log retrieval, streaming, indexing, previews, or search;
 - Docker Compose discovery or control;
 - arbitrary Docker API proxying;
 - host-wide filesystem inventory or arbitrary path collection;
@@ -27,13 +26,15 @@ Phase 1 does **not** add:
 - notification delivery to email, chat, or paging systems; or
 - user-authored arbitrary expressions. Initial alert rules are a typed allowlist.
 
+**Approved later exception — on-demand realtime container logs.** Retrieving or streaming container logs is no longer a Phase 1 non-goal, but the exception is deliberately narrow and does not relax any monitoring invariant: logs are read only while a viewer is connected, are never collected, persisted, replayed, or monitored in the background, and never enter any Phase 1 monitoring repository, dashboard overview, or SSE event. Permitted reads are limited to `GET /containers/{id}/json` (to learn `Config.Tty`) and one continuous `GET /containers/{id}/logs?stdout=1&stderr=1&tail=200&timestamps=1&follow=1` per open viewer, both still behind the hardcoded allowlist and the resolved 64-character lowercase-hex daemon ID. Background log collection, indexing, previews, search, download, log-driven alerts, and log content in audit/jobs/metrics remain non-goals.
+
 ### Monitoring-only and privacy invariants
 
 These are release-blocking invariants, not implementation preferences:
 
 1. Only the Go agent may open `/var/run/docker.sock`. The NestJS API and React web process never receive, mount, proxy, or dial the Docker socket.
-2. Agent Docker access remains an explicit GET allowlist. Phase 1 may add only read endpoints needed for bounded monitoring: `/version`, `/containers/json?all=1&size=false`, `/containers/{id}/stats?stream=false`, `/events` with bounded filters/time, and `/system/df`. No generic request helper may accept a path from API or UI input.
-3. Never collect or persist environment variables, arbitrary labels, mount source/destination paths, mount content, commands/entrypoints/arguments, logs, secrets, Docker configs, Docker secrets, or inspect payloads.
+2. Agent Docker access remains an explicit GET allowlist. Phase 1 may add only read endpoints needed for bounded monitoring: `/version`, `/containers/json?all=1&size=false`, `/containers/{id}/stats?stream=false`, `/events` with bounded filters/time, and `/system/df`. Under the approved realtime-logs exception the allowlist additionally contains exactly `/containers/{id}/json` and `/containers/{id}/logs`, both permitted only behind an open viewer subscription and only when `dockerManagementEnabled` and the non-system manager policy already permit actions on that target. No generic request helper may accept a path from API or UI input.
+3. Never collect or persist environment variables, arbitrary labels, mount source/destination paths, mount content, commands/entrypoints/arguments, secrets, Docker configs, Docker secrets, or inspect payloads. On-demand realtime log reads are the only approved content exception: they are viewer-triggered and ephemeral, and log lines are never written to any repository, file, audit record, metric, dashboard snapshot, or monitoring SSE payload. Monitoring-phase safeguards on raw request payloads, IDs before derivation, image/name combinations at warning/error level, and cursors containing raw IDs remain unchanged; log stream errors surface only the published safe error codes, never daemon or log bodies.
 4. Container fields remain a narrow allowlist: opaque public ID, bounded display name, bounded image reference, state, bounded status, creation time, health classification when derivable from allowed state/status/event fields, and numeric resource counters.
 5. Storage overview means the sanitized aggregate semantics of Docker Engine `GET /system/df`: totals and reclaimable/active sizes for images, containers, local volumes, and build cache. Do not send object names, volume names, mount points, layer IDs, cache records, or per-object details.
 6. Operational Docker events are stored in a dedicated bounded event repository/table. They are not `AuditEvent`s and must not be written to `data/audit.json` or the PostgreSQL audit table. User actions such as acknowledging an alert may produce a low-volume audit record; daemon events may not.
@@ -220,6 +221,29 @@ Gauge average is arithmetic mean over accepted observed samples, not time-weight
 5. One connection may have only one async tick/write in flight. Honor `res.write()` backpressure: stop producing detail frames while false, retain only the collapsed bounded invalidation, resume on `drain`, and close after a configurable 10-second slow-consumer timeout. `close`, `finish`, and `error` synchronously clear timers/listeners/pending state; no overlapping `setInterval(async ...)` calls.
 6. Migrate global `/api/monitoring/stream` away from full `dockerMetrics` arrays: advertise `dockerInvalidationV1` in `monitoring.hello`; capable clients use invalidations plus REST. During one compatibility release, legacy clients receive the old bounded latest array only under the existing 20-per-VPS contract and a 32 KiB frame cap; overflow sends `refresh_required`. Remove the legacy branch after the supported web version advances. Test hundreds of VPS latest records to prove frame and pending-set bounds. Detailed Docker pages use the scoped stream.
 
+### Approved exception: on-demand realtime container logs (separate transport, no monitoring ingestion)
+
+Realtime container logs are outside the Phase 1 monitoring data flow by construction. They use their own endpoints, their own registry, and their own SSE stream, and they never add a field, event, or repository to Phase 1 monitoring.
+
+Wire contract (mirrored strictly in `packages/api/src/docker/docker-logs.schemas.ts` and `packages/agent/internal/logs/protocol.go`, fail-closed in both directions with every unknown key rejected):
+
+- Browser: `GET /api/vps/:id/docker/management/logs/stream?agentInstanceId=<id>&containerKey=<key>`. Both query parameters are REQUIRED and there is no `tail`, cursor, or `follow` option: the tail is fixed at 200. Each valid connection creates one ephemeral in-memory subscription; that connection is its only viewer, there is no subscription-then-attach split, and therefore no replay buffer or delete route. Connection policy: `DashboardSessionGuard` + `OriginGuard`, VPS existence, `dockerManagementEnabled`/non-system-manager policy, and target membership in the current inventory snapshot (`listCurrentContainers`) are all checked before SSE headers are written. Query errors are 400, unknown VPS/target 404, policy-disabled 403, over the connection allowance 429, all as ordinary JSON.
+- Agent: `POST /api/agent/logs/claim` (`{agentInstanceId}` → `{data:{subscription:null|{subscriptionId,vpsId,agentInstanceId,containerKey,tailLines:200,expiresAt}}}`) flips `waiting` → `claimed` atomically and never re-claims; `POST /api/agent/logs/:subscriptionId/chunks` (`{agentInstanceId,sequence,ready,lines}`) answers `{data:{ok:true,subscriptionId,sequence}}`; `POST /api/agent/logs/:subscriptionId/result` (`{agentInstanceId,status,errorCode?}`) answers `{data:{ok:true,subscriptionId,agentInstanceId}}`. Agent routes use the same `verifyAgentBearerToken()` credential verification as metrics and commands, the local-updater credential is rejected, and the credential's `vpsId` is bound to the subscription so a credential for one VPS can neither claim nor write another VPS's stream. Unknown subscription ids answer 404, closed ones 410; instance mismatch 401; sequence other than the next expected 409.
+- SSE to the browser: `docker.logs.state` (`{subscriptionId,status:"waiting"|"live"}`), `docker.logs.lines` (`{subscriptionId,lines:[{stream:"stdout"|"stderr"|"combined",text,truncated}]}`), `docker.logs.closed` (`{subscriptionId,reason:"completed"|"failed"|"expired",errorCode?}`) and then response close. Headers are the monitoring conventions (`text/event-stream`, `no-cache, no-transform`, `Connection: keep-alive`) plus `X-Accel-Buffering:no`, with a 15-second keepalive comment.
+
+Bounds, in both implementations:
+
+- One Docker request per subscription: `GET /containers/{id}/json` (to read `Config.Tty`, bounded at 256 KiB) then `GET /containers/{id}/logs?stdout=1&stderr=1&tail=200&timestamps=1&follow=1`. There is no snapshot-and-then-follow pair, because two requests would gap or duplicate; there is no automatic source reconnect and no re-read of the tail inside one subscription.
+- One line is at most 4 KiB UTF-8, truncated at a rune boundary and reported once with `truncated=true` while the remainder drains to the next newline; empty lines are preserved; `combined` is TTY-only. A batch is at most 100 lines and 32 KiB serialized JSON, measured on serialized bytes. Sequence starts at 1 and increments once per batch/heartbeat; an empty `lines` array is a heartbeat, sent every second so a silent container still proves liveness.
+- Agent side: 4 concurrent follow sources at most, claiming once per second while a slot is free, one in-flight upload at a time so batches can never reorder, and a 4-batch bounded queue that fails the stream (`stream_lost`) instead of buffering without limit or dropping silently. Reader EOF drains the queue and flushes the final partial line before reporting `completed`; cancellation flushes nothing new.
+- Browser side: the viewer keeps at most 2,000 lines or 1 MiB of text, dropping the oldest with a visible notice, and coalesces appends to at most one render per 100 ms.
+
+Lifecycle: a claim plus `ready` must arrive within 30 seconds of the viewer opening, otherwise `agent_unavailable`; after going live, 10 seconds without a batch or heartbeat is `stream_lost`; the hard subscription lifetime is 2 hours (`expired`, and reconnect opens a fresh 200-line window); policy and dashboard session are revalidated every 15 seconds and expiry/logout ends the stream with `session_expired`; `res.write()` returning false ends the stream as `slow_consumer`. Safe error codes are exactly `container_not_found`, `target_mismatch`, `daemon_unreachable`, `logs_unavailable`, `invalid_docker_stream`, `agent_unavailable`, `stream_lost`, `slow_consumer`, `session_expired`; daemon error bodies and log text never reach an error, a log, a metric, or a response.
+
+Reconnect and demo semantics: the browser `EventSource` never auto-reconnects. `onerror` closes the connection immediately and the viewer shows a disconnected state with a reconnect control; reconnecting is a new subscription, so the displayed buffer is cleared and Docker re-serves the latest 200 lines. Anything emitted in the lost window is deliberately not replayed, because there is nothing to replay it from. Demo mode reports the capability with `logsSupported: false` and an explicit reason instead of opening a source, and `dockerManagementEnabled`/non-system-manager policy gates the stream exactly like the action endpoints.
+
+Rollout: this needs the new API and a new Linux agent together. The agent must be on Linux, because the log source is a separate client that dials only `/var/run/docker.sock` with its own timeout/transport and fails with an explicit unsupported-transport error elsewhere. An older agent cannot claim, so a viewer reports `agent_unavailable` after 30 seconds rather than inventing lines; a new agent against an older API gets a 404 on the claim route and stops its logs worker until restart without disturbing commands, metrics, or the monitoring worker. Verification is behavioral: fake-daemon and broker tests for the decoder, batching, ordering, heartbeat, cancellation, and timeout paths, plus a real-Docker end-to-end smoke when a Linux VPS with socket access is available — automated tests alone do not claim production realtime evidence.
+
 ## 4. Incremental Work Breakdown
 
 ### Dependency graph
@@ -244,7 +268,7 @@ I0 Contract/privacy lock
 #### Behavior and acceptance criteria
 
 - [ ] Define schema v2 as an additive discriminated contract while retaining schema v1 validation.
-- [ ] Add tests that reject every forbidden class: env, labels, mounts, command/args, logs, secrets, unknown storage object detail, and arbitrary event attributes.
+- [ ] Add tests that reject every forbidden class: env, labels, mounts, command/args, secrets, unknown storage object detail, and arbitrary event attributes. Persisted log content is a separate, also-forbidden class: the on-demand realtime logs exception must be proven to leave no log line in any repository, file, audit record, metric, or monitoring payload.
 - [ ] Document allowed Docker API paths as constants/tests; no dynamic user-provided path reaches the agent HTTP client.
 - [ ] Set explicit caps and default retention values before migration creation.
 
@@ -483,7 +507,7 @@ The complete state model is specified in [Alert lifecycle and state model](#5-al
 - [ ] Every chart indicates source time range, freshness, gaps, partial coverage, counter resets, and whether data is raw or hourly rollup.
 - [ ] Container list states “showing N retained details of authoritative total M.”
 - [ ] Events are labeled operational Docker events, not audit history.
-- [ ] No control affordance suggests start/stop/restart/exec/log/Compose capability.
+- [ ] No Phase 1 control affordance suggests start/stop/restart/exec/Compose capability, and no Phase 1 view presents logs. The separately approved realtime-logs viewer is the single log surface: it opens on demand, is bounded to 2,000 displayed lines or 1 MiB with a visible discard notice, and reconnects by opening a new subscription that re-reads the fixed 200-line tail instead of promising a replay of whatever was missed while disconnected.
 - [ ] Mobile, keyboard, screen-reader, loading, empty, unsupported-agent, stale, and error states are tested.
 
 #### Exact change map
@@ -621,6 +645,9 @@ Persist `formulaVersion=1`, every category's `supported` flag and object count, 
 | Monitoring disabled | Agent stops socket access after next acknowledged config; API ignores stale branches as today; lifecycle/data handling follows agreed policy. |
 | Container deleted/recreated with same name | Different `containerKey`; history is not merged by name. Resolve the old container alert only from an exact typed `destroy`/`remove` event or an administrative identity/disable transition. |
 | Counter reset/daemon restart | Mark reset; rate is unknown/zero for that interval, never a negative spike. |
+| Agent log source unavailable on non-Linux | Explicit unsupported-transport failure; no TCP daemon target is configurable, and the subscription fails safely rather than dialing any other endpoint. |
+| Docker logging driver cannot serve reads (4xx/5xx other than 404) | `logs_unavailable`, terminal and retryable by reconnecting; the logging driver is never switched and host log files are never read. |
+| Log daemon frame malformed or split across reads | `invalid_docker_stream` — the incremental decoder reassembles with `io.ReadFull` and has no raw fallback, so partial headers/payloads or bad stream IDs fail closed instead of leaking binary bytes. |
 
 ### Migration and backfill
 
@@ -692,7 +719,7 @@ PostgreSQL integration tests are gated by `VPS_MANAGER_TEST_POSTGRES_URL`, match
 
 - [ ] All five scoped capabilities are usable: detail, history, operational events, server-side alerts, and aggregate Docker storage.
 - [ ] Monitoring-only and privacy invariants have automated regression evidence.
-- [ ] No production code exposes Docker control, logs, Compose, arbitrary inspect data, or API/Web socket access.
+- [ ] No production code exposes Docker control, Compose, arbitrary inspect data, or API/Web socket access. The realtime logs exception is on-demand only: no background log collection, indexing, previews, search, download, log-driven alerts, or log content in audit/jobs/metrics.
 - [ ] v1 and v2 schema compatibility and mixed fleet behavior are tested.
 - [ ] Latest totals remain authoritative and retained details are visibly capped.
 - [ ] Five-second global Docker budget and sequential stats limitations are represented by partial coverage rather than impossible cadence promises.

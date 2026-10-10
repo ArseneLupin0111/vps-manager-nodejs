@@ -1,32 +1,87 @@
 import { Injectable, ForbiddenException, InternalServerErrorException, NotFoundException, UnauthorizedException, Inject } from "@nestjs/common";
-import { VPS_REPOSITORY, DOCKER_MANAGEMENT_REPOSITORY } from "../tokens.js";
+import { VPS_REPOSITORY, DOCKER_MANAGEMENT_REPOSITORY, DOCKER_MONITORING_REPOSITORY, APP_CONFIG } from "../tokens.js";
 import { createHash } from "node:crypto";
 import type { VpsRepository } from "../persistence/repositories/vps.repository.js";
 import type { DockerManagementRepository } from "../persistence/repositories/docker-management.repository.js";
+import type { DockerMonitoringRepository } from "../persistence/repositories/docker-monitoring.repository.js";
+import type { AppConfig } from "../config/app-config.js";
 import type { DockerManagementAction, DockerManagementOperation, DockerManagementResult, DockerManagementTarget } from "./docker-management.models.js";
 import { DockerManagementConflict } from "./docker-management.models.js";
-import { agentCommandSchema, type AgentCommand, type AgentCommandReport } from "./docker-management.schemas.js";
+import { agentCommandSchema, dockerManagementTargetSchema, type AgentCommand, type AgentCommandReport } from "./docker-management.schemas.js";
+import type { DockerCurrentContainer } from "./docker-monitoring.models.js";
 
 type AllowedDockerManagementAction = Extract<DockerManagementAction, "start" | "stop" | "restart">;
 const ACTIONS: Record<AllowedDockerManagementAction, true> = { start: true, stop: true, restart: true };
 const TTL_MS = 5 * 60_000;
+/** Maximum log lines the realtime viewer reopens from a fresh subscription. */
 const LOG_LIMIT = 200;
-const LOG_BODY_LIMIT = 2000;
-type LogEntry = { vpsId: string; target: DockerManagementTarget; line: string };
+/** Reported when policy allows Docker actions but real logs have no source. */
+const DEMO_LOGS_REASON = "Realtime Docker logs are unavailable in demo mode";
+/** Viewer target projection shared with the dashboard and log-stream contract. */
+type DockerManagementTargetsRow = {
+  containerKey: string;
+  name: string;
+  image?: string;
+  state?: string;
+  agentInstanceId: string;
+};
 
 @Injectable()
 export class DockerManagementService {
-  private readonly logs: LogEntry[] = [];
   constructor(
     @Inject(VPS_REPOSITORY) private readonly vps: VpsRepository,
     @Inject(DOCKER_MANAGEMENT_REPOSITORY) private readonly repository: DockerManagementRepository,
+    @Inject(DOCKER_MONITORING_REPOSITORY) private readonly monitoring: DockerMonitoringRepository,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async capability(vpsId: string) {
     const record = await this.vps.get(vpsId);
     if (!record) throw new NotFoundException("VPS not found");
-    const enabled = record.dockerManagementEnabled === true;
-    return { supported: enabled, reason: enabled ? undefined : "Docker management is disabled", actions: enabled ? ["start", "stop", "restart"] : [], logsSupported: true, maxLogLines: LOG_LIMIT };
+    const enabled = record.managedBy !== "system" && record.dockerManagementEnabled === true;
+    // Realtime logs need a real agent-backed Docker source, so demo mode
+    // reports them unsupported while keeping identity and actions usable.
+    const logsSupported = enabled && this.config.mode === "local";
+    let reason: string | undefined;
+    if (record.managedBy === "system") reason = "Docker management is unavailable";
+    else if (record.dockerManagementEnabled !== true) reason = "Docker management is disabled";
+    else if (this.config.mode === "demo") reason = DEMO_LOGS_REASON;
+    return {
+      supported: enabled,
+      reason,
+      actions: enabled ? ["start", "stop", "restart"] : [],
+      logsSupported,
+      maxLogLines: LOG_LIMIT,
+      targets: enabled ? await this.listTargets(vpsId) : [],
+    };
+  }
+
+  /**
+   * Container identities the viewer may target, from the latest committed
+   * snapshot only. Identity discovery stays available even when monitoring
+   * data is disabled: dockerMetricsEnabled gates samples, not targets.
+   * Rows missing half of the (agentInstanceId, containerKey) pair are
+   * dropped: both halves are required by the log-stream contract.
+   */
+  private async listTargets(vpsId: string): Promise<DockerManagementTargetsRow[]> {
+    const rows: DockerCurrentContainer[] = await this.monitoring.listCurrentContainers(vpsId);
+    const targets: DockerManagementTargetsRow[] = [];
+    for (const row of rows) {
+      const parsed = dockerManagementTargetSchema.safeParse({
+        containerKey: row.containerKey,
+        ...(row.agentInstanceId ? { agentInstanceId: row.agentInstanceId } : {}),
+      });
+      // Both halves of the identity are required by the log-stream contract.
+      if (!parsed.success || !parsed.data.agentInstanceId) continue;
+      targets.push({
+        containerKey: parsed.data.containerKey,
+        name: row.name ?? parsed.data.containerKey,
+        ...(row.image !== undefined ? { image: row.image } : {}),
+        ...(row.state !== undefined ? { state: row.state } : {}),
+        agentInstanceId: parsed.data.agentInstanceId,
+      });
+    }
+    return targets;
   }
 
   async create(vpsId: string, input: { action: DockerManagementAction; target: DockerManagementTarget; idempotencyKey: string; confirmedAt?: string }) {
@@ -131,17 +186,4 @@ export class DockerManagementService {
     return echo;
   }
 
-  appendLog(vpsId: string, id: string, line: string) {
-    const opPromise = this.get(vpsId, id);
-    void opPromise.then(op => {
-      this.logs.push({ vpsId, target: op.target, line: line.slice(0, LOG_BODY_LIMIT) });
-      if (this.logs.length > LOG_LIMIT) this.logs.splice(0, this.logs.length - LOG_LIMIT);
-    });
-  }
-
-  async getLogs(vpsId: string, target: DockerManagementTarget, lines = 100) {
-    const n = Math.min(LOG_LIMIT, Math.max(1, Math.floor(lines)));
-    const values = this.logs.filter(entry => entry.vpsId === vpsId && entry.target.containerKey === target.containerKey && entry.target.agentInstanceId === target.agentInstanceId).map(entry => entry.line);
-    return { lines: values.slice(-n), truncated: values.length > n };
-  }
 }

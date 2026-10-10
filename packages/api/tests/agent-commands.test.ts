@@ -9,11 +9,16 @@ import type { VpsRepository } from "../src/persistence/repositories/vps.reposito
 import type { AgentRepository } from "../src/persistence/repositories/agent.repository.js";
 import type { MetricRepository } from "../src/persistence/repositories/metric.repository.js";
 import type { DockerManagementRepository } from "../src/persistence/repositories/docker-management.repository.js";
+import type { DockerMonitoringRepository } from "../src/persistence/repositories/docker-monitoring.repository.js";
 import { createJsonAgentRepository } from "../src/persistence/repositories/agent.repository.js";
 import { createJsonAuditRepository } from "../src/persistence/repositories/audit.repository.js";
 import { createJsonJobRepository } from "../src/persistence/repositories/job.repository.js";
 import { createJsonMetricRepository } from "../src/persistence/repositories/metric.repository.js";
 import { createJsonDockerManagementRepository } from "../src/persistence/repositories/docker-management.repository.js";
+import {
+  createJsonDockerMonitoringRepository,
+  seedDockerMonitoringForTests,
+} from "../src/persistence/repositories/docker-monitoring.repository.js";
 import { createKeyService } from "../src/ssh/keyService.js";
 import { createVpsStore } from "../src/persistence/store/vpsStore.js";
 import { AgentService } from "../src/agents/agent.service.js";
@@ -52,6 +57,7 @@ let vpsRepo: VpsRepository;
 let agentRepo: AgentRepository;
 let metricRepo: MetricRepository;
 let mgmtRepo: DockerManagementRepository;
+let monitoringRepo: DockerMonitoringRepository;
 let mgmtService: DockerManagementService;
 let agentService: AgentService;
 let vpsId: string;
@@ -69,7 +75,15 @@ beforeEach(async () => {
   mgmtRepo = createJsonDockerManagementRepository(
     join(tempDir, "data", "docker-management.json"),
   );
-  mgmtService = new DockerManagementService(vpsRepo, mgmtRepo);
+  monitoringRepo = createJsonDockerMonitoringRepository(
+    join(tempDir, "data", "docker-monitoring.json"),
+  );
+  mgmtService = new DockerManagementService(
+    vpsRepo,
+    mgmtRepo,
+    monitoringRepo,
+    demoConfig,
+  );
   agentService = new AgentService(
     agentRepo,
     metricRepo,
@@ -94,6 +108,136 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(tempDir, { recursive: true, force: true });
+});
+
+// ── Capability policy gating (viewer identity discovery) ──────────────────
+// capability() projects the latest committed snapshot into (containerKey,
+// agentInstanceId) pairs. Docker policy gates supported/actions/targets;
+// app mode gates logsSupported only. dockerMetricsEnabled gates nothing
+// here: identity discovery is not monitoring data.
+
+const CAPABILITY_NOW = "2026-09-15T12:00:00.000Z";
+const localConfig: AppConfig = { ...demoConfig, mode: "local" };
+
+async function seedSnapshot(container: Record<string, unknown>) {
+  await seedDockerMonitoringForTests(
+    join(tempDir, "data", "docker-monitoring.json"),
+    {
+      samples: [
+        {
+          id: "cap_h",
+          vpsId,
+          agentInstanceId: "inst_local",
+          snapshotId: "snap_cap",
+          collectedAt: CAPABILITY_NOW,
+          receivedAt: CAPABILITY_NOW,
+          effectiveAt: CAPABILITY_NOW,
+          metrics: { cpuPercent: 1, memoryUsageBytes: 64, pids: 2 },
+        },
+        {
+          id: "cap_c",
+          vpsId,
+          agentInstanceId: "inst_local",
+          snapshotId: "snap_cap",
+          collectedAt: CAPABILITY_NOW,
+          receivedAt: CAPABILITY_NOW,
+          effectiveAt: CAPABILITY_NOW,
+          metrics: { cpuPercent: 1, memoryUsageBytes: 64, pids: 2 },
+          ...container,
+        },
+      ],
+    },
+  );
+}
+
+describe("DockerManagementService capability gating", () => {
+  it("maps committed snapshot rows into viewer targets", async () => {
+    await seedSnapshot({
+      containerKey: "ck_a",
+      name: "web",
+      image: "nginx:1.25",
+      state: "running",
+    });
+    const capability = await mgmtService.capability(vpsId);
+    expect(capability).toEqual({
+      supported: true,
+      actions: ["start", "stop", "restart"],
+      logsSupported: false,
+      reason: "Realtime Docker logs are unavailable in demo mode",
+      maxLogLines: 200,
+      targets: [
+        {
+          containerKey: "ck_a",
+          name: "web",
+          image: "nginx:1.25",
+          state: "running",
+          agentInstanceId: "inst_local",
+        },
+      ],
+    });
+  });
+
+  it("keeps identity discovery and action semantics in demo mode", async () => {
+    await seedSnapshot({ containerKey: "ck_demo", name: "web" });
+    // Demo mode exposes targets, but logs (agent-backed streaming) do not.
+    await expect(mgmtService.capability(vpsId)).resolves.toEqual({
+      supported: true,
+      actions: ["start", "stop", "restart"],
+      logsSupported: false,
+      reason: "Realtime Docker logs are unavailable in demo mode",
+      maxLogLines: 200,
+      targets: [
+        { containerKey: "ck_demo", name: "web", agentInstanceId: "inst_local" },
+      ],
+    });
+  });
+
+  it("reports log streaming as supported in local mode", async () => {
+    const localService = new DockerManagementService(
+      vpsRepo,
+      mgmtRepo,
+      monitoringRepo,
+      localConfig,
+    );
+    await seedSnapshot({ containerKey: "ck_a", name: "web" });
+    const capability = await localService.capability(vpsId);
+    expect(capability.logsSupported).toBe(true);
+  });
+
+  it("blocks system-managed hosts with no actions or targets", async () => {
+    await vpsRepo.update(vpsId, { managedBy: "system" });
+    await seedSnapshot({ containerKey: "ck_a", name: "web" });
+    await expect(mgmtService.capability(vpsId)).resolves.toEqual({
+      supported: false,
+      reason: "Docker management is unavailable",
+      actions: [],
+      logsSupported: false,
+      maxLogLines: 200,
+      targets: [],
+    });
+  });
+
+  it("blocks disabled management with no actions or targets", async () => {
+    await vpsRepo.update(vpsId, { dockerManagementEnabled: false });
+    await seedSnapshot({ containerKey: "ck_a", name: "web" });
+    await expect(mgmtService.capability(vpsId)).resolves.toEqual({
+      supported: false,
+      reason: "Docker management is disabled",
+      actions: [],
+      logsSupported: false,
+      maxLogLines: 200,
+      targets: [],
+    });
+  });
+
+  it("keeps action and claim semantics unchanged by capability gating", async () => {
+    const operation = await queue("start", { containerKey: CONTAINER_KEY });
+    expect(operation.status).toBe("queued");
+    const res = await claim({ agentInstanceId: "inst_a" }).expect(200);
+    expect(res.body.data.command).toMatchObject({
+      containerKey: CONTAINER_KEY,
+    });
+  });
 });
 
 function app() {

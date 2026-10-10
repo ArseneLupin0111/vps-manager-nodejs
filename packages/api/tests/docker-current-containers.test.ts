@@ -69,6 +69,7 @@ let sessionCookie: string;
 let vpsA = "";
 let vpsB = "";
 let vpsEmpty = "";
+let vpsBroken = "";
 
 function sample(
   id: string,
@@ -112,9 +113,22 @@ beforeEach(async () => {
     port: 22,
     username: "root",
   });
+  const createdBroken = await store.create({
+    name: "current-broken",
+    host: "203.0.113.23",
+    port: 22,
+    username: "root",
+  });
   vpsA = createdA.id;
   vpsB = createdB.id;
   vpsEmpty = createdEmpty.id;
+  vpsBroken = createdBroken.id;
+
+  // Docker management is enabled per VPS so capability targets are observable;
+  // `dockerMetricsEnabled` stays at its default (false) to prove identity
+  // discovery does not depend on monitoring data being enabled.
+  await store.update(vpsA, { dockerManagementEnabled: true });
+  await store.update(vpsBroken, { dockerManagementEnabled: true });
 
   await seedDockerMonitoringForTests(
     join(dataDir, "docker-monitoring.json"),
@@ -150,6 +164,37 @@ beforeEach(async () => {
           snapshotId: "snap_b_new",
           containerKey: "ck_b",
           name: "service-b",
+          state: "running",
+        }),
+        // VPS BROKEN, snapshot rows that cannot form a stream identity pair.
+        // Malformed keys must be dropped rather than fixed up or guessed.
+        sample("hb_broken", vpsBroken, T_NEW, {
+          agentInstanceId: "inst2",
+          snapshotId: "snap_broken",
+        }),
+        sample("ck_bad_chars", vpsBroken, T_NEW, {
+          agentInstanceId: "inst2",
+          snapshotId: "snap_broken",
+          containerKey: "ck/bad key",
+          name: "bad-key",
+        }),
+        sample("ck_too_long", vpsBroken, T_NEW, {
+          agentInstanceId: "inst2",
+          snapshotId: "snap_broken",
+          containerKey: "c".repeat(33),
+          name: "too-long",
+        }),
+        sample("ck_noname", vpsBroken, T_NEW, {
+          agentInstanceId: "inst2",
+          snapshotId: "snap_broken",
+          containerKey: "ck_noname",
+        }),
+        sample("ck_ok", vpsBroken, T_NEW, {
+          agentInstanceId: "inst2",
+          snapshotId: "snap_broken",
+          containerKey: "ck_ok",
+          name: "kept",
+          image: "redis:7",
           state: "running",
         }),
       ],
@@ -386,6 +431,88 @@ function capturingService() {
   );
   return { service, units };
 }
+
+// ── Capability targets (viewer identity discovery) ────────────────────────
+// capability() projects the latest committed snapshot into the (containerKey,
+// agentInstanceId) pairs the viewer can target. Discovery is not gated by
+// dockerMetricsEnabled, but every Docker action still is.
+
+describe("GET /api/vps/:id/docker/management/capability", () => {
+  it("returns canonical valid-pair targets in snapshot order", async () => {
+    const res = await authed(
+      request(server).get(`/api/vps/${vpsA}/docker/management/capability`),
+    ).expect(200);
+    expect(res.body).toEqual({
+      supported: true,
+      actions: ["start", "stop", "restart"],
+      logsSupported: true,
+      maxLogLines: 200,
+      targets: [
+        { containerKey: "ck_plain", name: "ck_plain", agentInstanceId: "inst1" },
+        { containerKey: "ck_web", name: "web", state: "running", agentInstanceId: "inst1" },
+      ],
+    });
+  });
+
+  it("drops rows whose containerKey violates the opaque charset or length", async () => {
+    const res = await authed(
+      request(server).get(`/api/vps/${vpsBroken}/docker/management/capability`),
+    ).expect(200);
+    expect(res.body.targets).toEqual([
+      { containerKey: "ck_noname", name: "ck_noname", agentInstanceId: "inst2" },
+      { containerKey: "ck_ok", name: "kept", image: "redis:7", state: "running", agentInstanceId: "inst2" },
+    ]);
+  });
+
+  it("keeps capability and target discovery available with monitoring disabled", async () => {
+    // vpsA has dockerMetricsEnabled at its default (false): capability must
+    // still resolve, because identity is not monitoring data.
+    const res = await authed(
+      request(server).get(`/api/vps/${vpsA}/docker/management/capability`),
+    ).expect(200);
+    expect(res.body.supported).toBe(true);
+    expect(res.body.targets).toHaveLength(2);
+  });
+
+  it("returns no targets when Docker management is disabled", async () => {
+    const res = await authed(
+      request(server).get(`/api/vps/${vpsEmpty}/docker/management/capability`),
+    ).expect(200);
+    expect(res.body).toEqual({
+      supported: false,
+      reason: "Docker management is disabled",
+      actions: [],
+      logsSupported: false,
+      maxLogLines: 200,
+      targets: [],
+    });
+  });
+
+  it("returns no targets when there is no committed snapshot", async () => {
+    const current = await authed(
+      request(server).get(`/api/vps/${vpsEmpty}/docker/containers/current`),
+    ).expect(200);
+    expect(current.body).toEqual({ data: [] });
+    const res = await authed(
+      request(server).get(`/api/vps/${vpsEmpty}/docker/management/capability`),
+    ).expect(200);
+    expect(res.body.targets).toEqual([]);
+  });
+
+  it("returns 404 for an unknown VPS", async () => {
+    await authed(
+      request(server).get(
+        "/api/vps/vps_missing_does_not_exist/docker/management/capability",
+      ),
+    ).expect(404, { error: { message: "VPS not found" } });
+  });
+
+  it("rejects unauthenticated capability reads with 401", async () => {
+    await request(server)
+      .get(`/api/vps/${vpsA}/docker/management/capability`)
+      .expect(401);
+  });
+});
 
 describe("docker ingest container name persistence", () => {
   it("maps the incoming container name onto persisted samples", async () => {
