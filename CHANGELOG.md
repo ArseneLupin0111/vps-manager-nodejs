@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — web CI test environment fixes
+
+- Provide the missing `matchMedia` browser API in the shared jsdom setup so the public landing authentication-boundary test can mount its responsive scroll effect without changing production behavior.
+- Wait for the deferred edit-server dialog's provider field before clearing it, removing the CI timing race while preserving the provider-clearing regression assertion.
+
 ## Unreleased — dark navy landing redesign
 
 - Restyle the public landing in a Termius-style dark navy/blue palette scoped entirely to `.landing-page` in `pages/landing.css` via local tokens (`--l-bg`, `--l-panel`, `--l-raised`, `--l-line`, `--l-line-soft`, `--l-text`, `--l-dim`, `--l-blue`, `--l-ok`, `--l-warn`, `--l-violet`) with re-hued telemetry tokens, replacing the charcoal/lime marketing styles. Dashboard tokens, dashboard UI, and auth are unchanged; no new dependencies.

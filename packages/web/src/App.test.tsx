@@ -2302,7 +2302,7 @@ describe("React dashboard", () => {
       expect(await screen.findByRole("heading", { name: "Production API" })).toBeInTheDocument();
       await openEditMenu(user);
       await user.click(screen.getByRole("menuitem", { name: "Edit server" }));
-      await user.clear(screen.getByLabelText("Provider"));
+      await user.clear(await screen.findByLabelText("Provider"));
 
       fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: clearedServer }) });
       queueRefresh(clearedServer);

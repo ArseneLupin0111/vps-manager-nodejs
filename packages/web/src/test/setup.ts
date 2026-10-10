@@ -1,5 +1,22 @@
 import "@testing-library/jest-dom/vitest";
 
+// jsdom has no media-query engine. Keep responsive effects in their static
+// layout unless a test supplies its own matching media query implementation.
+Object.defineProperty(window, "matchMedia", {
+  configurable: true,
+  writable: true,
+  value: (media: string): MediaQueryList => ({
+    matches: false,
+    media,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => true,
+  }),
+});
+
 // xterm probes canvas capabilities during module initialization. jsdom does
 // not implement canvas, so provide the smallest test-only capability stub.
 Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
