@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowUpRight,
@@ -43,12 +43,143 @@ const DEMO_GUIDE_URL = `${REPO_URL}/blob/main/docs/demo.md`;
 export function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Pinned-hero storytelling: native document scroll only (no wheel
+  // interception). While the hero scene is pinned, progress maps scroll to
+  // CSS properties on the scene element; reduced motion and short/narrow
+  // viewports keep the plain stacked flow.
+  const sceneRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setMenuOpen(false);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const media = window.matchMedia(
+      "(min-width: 64rem) and (min-height: 40rem)"
+    );
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    let frame = 0;
+    let unpinnedScroll = 0;
+    let active = false;
+
+    const reset = () => {
+      scene.style.setProperty("--scene-progress", "0");
+      scene.style.removeProperty("--preview-initial-top");
+      scene.style.removeProperty("--preview-travel");
+      scene.style.removeProperty("--preview-start-scale");
+      scene.style.removeProperty("--preview-scale-delta");
+      scene.removeAttribute("data-scene-active");
+      scene.removeAttribute("data-scene-pinned");
+      scene.removeAttribute("data-scene-copy-faded");
+    };
+
+    // Re-measure on media/preference/viewport changes, then repaint.
+    const sync = () => {
+      active = media.matches && !reduceMotion.matches;
+      if (!active) {
+        reset();
+        return;
+      }
+
+      const stage = scene.querySelector<HTMLElement>(".landing-hero-stage");
+      const metaEl = scene.querySelector<HTMLElement>(".landing-hero-meta");
+      const copyEl = scene.querySelector<HTMLElement>(
+        ".landing-hero-stage-copy"
+      );
+      const previewWrap = scene.querySelector<HTMLElement>(
+        ".landing-hero-preview-wrap"
+      );
+
+      // Measure capability row bottom with extra 40px gap so preview does not
+      // collide with highlights row at initial flow.
+      let initialTop = 420;
+      if (stage && metaEl) {
+        const stageRect = stage.getBoundingClientRect();
+        const metaRect = metaEl.getBoundingClientRect();
+        initialTop = Math.round(metaRect.bottom - stageRect.top + 40);
+      } else if (copyEl) {
+        initialTop = Math.round(copyEl.offsetHeight + 40);
+      }
+
+      // Fit shorter desktop heights (e.g. 900, 768, 640): scale preview so the
+      // entire console + caption + caveat fits the sticky stage at end.
+      const headerH = 72;
+      const stageH = window.innerHeight - headerH;
+      const availableH = stageH - 36;
+      const previewH = previewWrap ? previewWrap.offsetHeight : 770;
+
+      // Safe static fallback if viewport cannot fit scaled preview comfortably
+      if (window.innerHeight < 600 || availableH / previewH < 0.6) {
+        active = false;
+        reset();
+        return;
+      }
+
+      scene.setAttribute("data-scene-active", "");
+      scene.style.setProperty("--scene-progress", "0");
+
+      const endScale = Math.min(1, Number((availableH / previewH).toFixed(3)));
+      const startScale = Number((endScale * 0.95).toFixed(3));
+      const scaleDelta = Number((endScale - startScale).toFixed(3));
+      const scaledH = previewH * endScale;
+
+      // Vertically center final preview in sticky stage with ~24px top bound
+      const targetTop = Math.max(16, Math.round((stageH - scaledH) / 2));
+      const travel = Math.max(0, initialTop - targetTop);
+
+      scene.style.setProperty("--preview-initial-top", `${initialTop}px`);
+      scene.style.setProperty("--preview-travel", `${travel}px`);
+      scene.style.setProperty("--preview-start-scale", `${startScale}`);
+      scene.style.setProperty("--preview-scale-delta", `${scaleDelta}`);
+
+      // Guard: if the scene can't pin (e.g. height collapses), bail out.
+      unpinnedScroll = scene.offsetHeight - window.innerHeight;
+      if (unpinnedScroll <= 0) {
+        active = false;
+        reset();
+        return;
+      }
+      render();
+    };
+
+    const render = () => {
+      frame = 0;
+      if (!active || unpinnedScroll <= 0) return;
+      const rect = scene.getBoundingClientRect();
+      const top = rect.top;
+      // Progress 0 while the scene is still entering, 1 once it unpins.
+      const progress = Math.min(1, Math.max(0, -top / unpinnedScroll));
+      scene.style.setProperty("--scene-progress", progress.toFixed(4));
+      scene.toggleAttribute("data-scene-pinned", progress > 0 && progress < 1);
+      scene.toggleAttribute("data-scene-copy-faded", progress >= 0.85);
+    };
+
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(render);
+    };
+
+    media.addEventListener("change", sync);
+    reduceMotion.addEventListener("change", sync);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", sync);
+    sync();
+
+    return () => {
+      media.removeEventListener("change", sync);
+      reduceMotion.removeEventListener("change", sync);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", sync);
+      if (frame) window.cancelAnimationFrame(frame);
+      reset();
+    };
   }, []);
 
   useEffect(() => {
@@ -167,243 +298,252 @@ export function LandingPage() {
 
       <main id="main-content" tabIndex={-1}>
         <section className="landing-hero" aria-labelledby="landing-hero-title">
-          <div className="landing-wrap">
-            <div className="landing-hero-copy">
-              <p className="landing-eyebrow">
-                <span className="landing-eyebrow-dot" aria-hidden="true" />
-                Self-hosted VPS operations dashboard
-              </p>
-              <h1 className="landing-hero-title" id="landing-hero-title">
-                Modern VPS Management
-              </h1>
-              <p className="landing-hero-sub">
-                Server health, Docker and SSH jobs. One workspace, on your
-                infrastructure.
-              </p>
-              <div className="landing-hero-ctas">
-                <a
-                  className="landing-btn landing-btn-primary"
-                  href={DEPLOY_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Read the deployment docs
-                  <ArrowUpRight size={17} aria-hidden="true" />
-                </a>
-                <a
-                  className="landing-btn landing-btn-secondary"
-                  href={REPO_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Browse on GitHub
-                </a>
+          <div className="landing-hero-scene" ref={sceneRef}>
+            <div className="landing-hero-stage">
+              <div className="landing-wrap landing-hero-stage-copy">
+                <div className="landing-hero-copy">
+                  <p className="landing-eyebrow">
+                    <span className="landing-eyebrow-dot" aria-hidden="true" />
+                    Self-hosted VPS operations dashboard
+                  </p>
+                <h1 className="landing-hero-title" id="landing-hero-title">
+                  Modern VPS Management
+                </h1>
+                <p className="landing-hero-sub">
+                  Server health, Docker and SSH jobs. One workspace, on your
+                  infrastructure.
+                </p>
+                <div className="landing-hero-ctas">
+                  <a
+                    className="landing-btn landing-btn-primary"
+                    href={DEPLOY_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Read the deployment docs
+                    <ArrowUpRight size={17} aria-hidden="true" />
+                  </a>
+                  <a
+                    className="landing-btn landing-btn-secondary"
+                    href={REPO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Browse on GitHub
+                  </a>
+                </div>
               </div>
+  
+              <ul className="landing-hero-meta" aria-label="Highlights">
+                <li className="landing-hero-meta-item">
+                  <Check size={15} aria-hidden="true" />
+                  Many servers in one place
+                </li>
+                <li className="landing-hero-meta-item">
+                  <Check size={15} aria-hidden="true" />
+                  Per-host resource history
+                </li>
+                <li className="landing-hero-meta-item">
+                  <Check size={15} aria-hidden="true" />
+                  Deploys on your infrastructure
+                </li>
+              </ul>
             </div>
 
-            <ul className="landing-hero-meta" aria-label="Highlights">
-              <li className="landing-hero-meta-item">
-                <Check size={15} aria-hidden="true" />
-                Many servers in one place
-              </li>
-              <li className="landing-hero-meta-item">
-                <Check size={15} aria-hidden="true" />
-                Per-host resource history
-              </li>
-              <li className="landing-hero-meta-item">
-                <Check size={15} aria-hidden="true" />
-                Deploys on your infrastructure
-              </li>
-            </ul>
-          </div>
+            <div className="landing-wrap landing-hero-preview-wrap">
+              <figure
+                className="landing-console"
+                aria-labelledby="landing-console-title"
+              >
+                <div className="landing-console-chrome">
+                  <span className="landing-chrome-dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  <span
+                    className="landing-chrome-title"
+                    id="landing-console-title"
+                  >
+                    vps-prod-01 — Overview
+                  </span>
+                  <span className="landing-sample-badge">Sample data</span>
+                </div>
+                <div className="landing-console-body">
+                  <ul
+                    className="landing-hosts"
+                    aria-label="Sample server list"
+                  >
+                    <li className="landing-host-row is-online">
+                      <span className="landing-host-dot" aria-hidden="true" />
+                      <span className="landing-host-name tnum">vps-prod-01</span>
+                      <span className="landing-host-status">
+                        Online
+                      </span>
+                      <span className="landing-host-meta tnum">
+                        CPU 38% · RAM 62%
+                      </span>
+                    </li>
+                    <li className="landing-host-row is-stale">
+                      <span className="landing-host-dot" aria-hidden="true" />
+                      <span className="landing-host-name tnum">
+                        vps-staging-02
+                      </span>
+                      <span className="landing-host-status">Stale data</span>
+                      <span className="landing-host-meta tnum">
+                        CPU 12% · RAM 34%
+                      </span>
+                    </li>
+                  </ul>
 
-          <div className="landing-wrap landing-hero-preview-wrap">
-            <figure
-              className="landing-console"
-              aria-labelledby="landing-console-title"
-            >
-              <div className="landing-console-chrome">
-                <span className="landing-chrome-dots" aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-                <span
-                  className="landing-chrome-title"
-                  id="landing-console-title"
-                >
-                  vps-prod-01 — Overview
-                </span>
-                <span className="landing-sample-badge">Sample data</span>
-              </div>
-              <div className="landing-console-body">
-                <ul
-                  className="landing-hosts"
-                  aria-label="Sample server list"
-                >
-                  <li className="landing-host-row is-online">
-                    <span className="landing-host-dot" aria-hidden="true" />
-                    <span className="landing-host-name tnum">vps-prod-01</span>
-                    <span className="landing-host-status">
-                      Online
-                    </span>
-                    <span className="landing-host-meta tnum">
-                      CPU 38% · RAM 62%
-                    </span>
-                  </li>
-                  <li className="landing-host-row is-stale">
-                    <span className="landing-host-dot" aria-hidden="true" />
-                    <span className="landing-host-name tnum">
-                      vps-staging-02
-                    </span>
-                    <span className="landing-host-status">Stale data</span>
-                    <span className="landing-host-meta tnum">
-                      CPU 12% · RAM 34%
-                    </span>
-                  </li>
-                </ul>
+                  <div className="landing-metrics">
+                    <div className="landing-metric">
+                      <div className="landing-metric-head">
+                        <span className="landing-metric-label">CPU</span>
+                        <span className="landing-metric-value tnum">38%</span>
+                      </div>
+                      <div
+                        className="landing-meter"
+                        role="img"
+                        aria-label="Sample CPU at 38 percent"
+                      >
+                        <span
+                          className="landing-meter-fill is-cpu"
+                          style={{ width: "38%" }}
+                        />
+                      </div>
+                      <span className="landing-metric-cap tnum">
+                        4 vCPU · load 1.24
+                      </span>
+                    </div>
+                    <div className="landing-metric">
+                      <div className="landing-metric-head">
+                        <span className="landing-metric-label">RAM</span>
+                        <span className="landing-metric-value tnum">62%</span>
+                      </div>
+                      <div
+                        className="landing-meter"
+                        role="img"
+                        aria-label="Sample memory at 62 percent"
+                      >
+                        <span
+                          className="landing-meter-fill is-mem"
+                          style={{ width: "62%" }}
+                        />
+                      </div>
+                      <span className="landing-metric-cap tnum">
+                        7.4 / 12 GiB
+                      </span>
+                    </div>
+                    <div className="landing-metric">
+                      <div className="landing-metric-head">
+                        <span className="landing-metric-label">Disk</span>
+                        <span className="landing-metric-value tnum">41%</span>
+                      </div>
+                      <div
+                        className="landing-meter"
+                        role="img"
+                        aria-label="Sample disk at 41 percent"
+                      >
+                        <span
+                          className="landing-meter-fill is-disk"
+                          style={{ width: "41%" }}
+                        />
+                      </div>
+                      <span className="landing-metric-cap tnum">82 / 200 GiB</span>
+                    </div>
+                  </div>
 
-                <div className="landing-metrics">
-                  <div className="landing-metric">
-                    <div className="landing-metric-head">
-                      <span className="landing-metric-label">CPU</span>
-                      <span className="landing-metric-value tnum">38%</span>
+                  <div className="landing-panels">
+                    <div className="landing-panel">
+                      <p className="landing-panel-title">
+                        <Activity size={15} aria-hidden="true" />
+                        CPU history · 60 sample minutes
+                      </p>
+                      <svg
+                        className="landing-chart"
+                        viewBox="0 0 260 84"
+                        role="img"
+                        aria-label="Static sample chart: CPU moves between 30 and 55 percent over 60 sample minutes"
+                      >
+                        <g aria-hidden="true">
+                          <line
+                            x1="0"
+                            y1="21"
+                            x2="260"
+                            y2="21"
+                            className="landing-chart-grid"
+                          />
+                          <line
+                            x1="0"
+                            y1="42"
+                            x2="260"
+                            y2="42"
+                            className="landing-chart-grid"
+                          />
+                          <line
+                            x1="0"
+                            y1="63"
+                            x2="260"
+                            y2="63"
+                            className="landing-chart-grid"
+                          />
+                          <polyline
+                            points="0,50 22,46 44,48 66,40 88,42 110,34 132,37 154,30 176,33 198,26 220,30 242,24 260,27"
+                            className="landing-chart-line is-cpu"
+                          />
+                        </g>
+                      </svg>
+                      <p className="landing-panel-meta">
+                        <span className="landing-legend is-cpu">CPU</span>
+                        <span className="tnum">uptime 42 days</span>
+                      </p>
                     </div>
-                    <div
-                      className="landing-meter"
-                      role="img"
-                      aria-label="Sample CPU at 38 percent"
-                    >
-                      <span
-                        className="landing-meter-fill is-cpu"
-                        style={{ width: "38%" }}
-                      />
+                    <div className="landing-panel">
+                      <p className="landing-panel-title">
+                        <TerminalSquare size={15} aria-hidden="true" />
+                        Recent sample jobs
+                      </p>
+                      <ul className="landing-jobs">
+                        <li className="landing-job-row">
+                          <span className="landing-job-name tnum">
+                            backup-nightly
+                          </span>
+                          <span className="landing-pill is-ok">Succeeded</span>
+                        </li>
+                        <li className="landing-job-row">
+                          <span className="landing-job-name tnum">
+                            deploy-api · 62%
+                          </span>
+                          <span className="landing-pill is-run">Running</span>
+                        </li>
+                      </ul>
+                      <p className="landing-panel-meta">
+                        6 Docker containers · 128 sample records
+                      </p>
                     </div>
-                    <span className="landing-metric-cap tnum">
-                      4 vCPU · load 1.24
-                    </span>
-                  </div>
-                  <div className="landing-metric">
-                    <div className="landing-metric-head">
-                      <span className="landing-metric-label">RAM</span>
-                      <span className="landing-metric-value tnum">62%</span>
-                    </div>
-                    <div
-                      className="landing-meter"
-                      role="img"
-                      aria-label="Sample memory at 62 percent"
-                    >
-                      <span
-                        className="landing-meter-fill is-mem"
-                        style={{ width: "62%" }}
-                      />
-                    </div>
-                    <span className="landing-metric-cap tnum">
-                      7.4 / 12 GiB
-                    </span>
-                  </div>
-                  <div className="landing-metric">
-                    <div className="landing-metric-head">
-                      <span className="landing-metric-label">Disk</span>
-                      <span className="landing-metric-value tnum">41%</span>
-                    </div>
-                    <div
-                      className="landing-meter"
-                      role="img"
-                      aria-label="Sample disk at 41 percent"
-                    >
-                      <span
-                        className="landing-meter-fill is-disk"
-                        style={{ width: "41%" }}
-                      />
-                    </div>
-                    <span className="landing-metric-cap tnum">82 / 200 GiB</span>
                   </div>
                 </div>
+                <figcaption className="landing-console-caption">
+                  Static layout illustration with sample numbers. It is not live
+                  telemetry and never connects to your servers.
+                </figcaption>
+              </figure>
+              <p className="landing-hero-caveat">
+                No hosted account, no third-party data store. This page is
+                informational only and offers no public demo: run your own
+                deployment in demo mode to explore with simulated data, or in
+                local mode to manage real servers.
+              </p>
+            </div>
 
-                <div className="landing-panels">
-                  <div className="landing-panel">
-                    <p className="landing-panel-title">
-                      <Activity size={15} aria-hidden="true" />
-                      CPU history · 60 sample minutes
-                    </p>
-                    <svg
-                      className="landing-chart"
-                      viewBox="0 0 260 84"
-                      role="img"
-                      aria-label="Static sample chart: CPU moves between 30 and 55 percent over 60 sample minutes"
-                    >
-                      <g aria-hidden="true">
-                        <line
-                          x1="0"
-                          y1="21"
-                          x2="260"
-                          y2="21"
-                          className="landing-chart-grid"
-                        />
-                        <line
-                          x1="0"
-                          y1="42"
-                          x2="260"
-                          y2="42"
-                          className="landing-chart-grid"
-                        />
-                        <line
-                          x1="0"
-                          y1="63"
-                          x2="260"
-                          y2="63"
-                          className="landing-chart-grid"
-                        />
-                        <polyline
-                          points="0,50 22,46 44,48 66,40 88,42 110,34 132,37 154,30 176,33 198,26 220,30 242,24 260,27"
-                          className="landing-chart-line is-cpu"
-                        />
-                      </g>
-                    </svg>
-                    <p className="landing-panel-meta">
-                      <span className="landing-legend is-cpu">CPU</span>
-                      <span className="tnum">uptime 42 days</span>
-                    </p>
-                  </div>
-                  <div className="landing-panel">
-                    <p className="landing-panel-title">
-                      <TerminalSquare size={15} aria-hidden="true" />
-                      Recent sample jobs
-                    </p>
-                    <ul className="landing-jobs">
-                      <li className="landing-job-row">
-                        <span className="landing-job-name tnum">
-                          backup-nightly
-                        </span>
-                        <span className="landing-pill is-ok">Succeeded</span>
-                      </li>
-                      <li className="landing-job-row">
-                        <span className="landing-job-name tnum">
-                          deploy-api · 62%
-                        </span>
-                        <span className="landing-pill is-run">Running</span>
-                      </li>
-                    </ul>
-                    <p className="landing-panel-meta">
-                      6 Docker containers · 128 sample records
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <figcaption className="landing-console-caption">
-                Static layout illustration with sample numbers. It is not live
-                telemetry and never connects to your servers.
-              </figcaption>
-            </figure>
-            <p className="landing-hero-caveat">
-              No hosted account, no third-party data store. This page is
-              informational only and offers no public demo: run your own
-              deployment in demo mode to explore with simulated data, or in
-              local mode to manage real servers.
+            <p className="landing-hero-scene-hint" aria-hidden="true">
+              <ChevronDown size={16} strokeWidth={2.25} />
+              Scroll to focus the dashboard
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
         <section
           className="landing-section"

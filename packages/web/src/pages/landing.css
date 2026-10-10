@@ -302,6 +302,99 @@
   border-bottom: 1px solid hsl(var(--l-line-soft) / 0.1);
 }
 
+/* Pinned hero storytelling. .landing-hero-scene is the scroll track.
+   Desktop-only: .landing-hero-stage is the sticky surface holding the scene
+   in view. The copy stays in normal initial flow (completely visible at
+   scroll=0) and the preview is absolutely positioned below it, translated
+   upward toward ~24px below the sticky header as progress advances.
+   Defaults to --scene-progress: 0 so mobile, short/narrow viewports, and
+   reduced-motion render the normal stacked flow with no extra scroll area. */
+.landing-hero-scene {
+  --scene-progress: 0;
+  position: relative;
+}
+
+.landing-hero-stage {
+  display: block;
+}
+
+.landing-hero-stage-copy {
+  display: block;
+}
+
+.landing-hero-preview-wrap {
+  position: relative;
+}
+
+@media (min-width: 64rem) and (min-height: 40rem) {
+  @media not (prefers-reduced-motion: reduce) {
+    /* Reserve extra scroll space for the pin ramp ONLY when active */
+    .landing-hero-scene[data-scene-active] {
+      height: 200vh;
+      position: relative;
+    }
+
+    /* Sticky stage block pinned directly below the sticky header */
+    .landing-hero-scene[data-scene-active] .landing-hero-stage {
+      position: sticky;
+      top: var(--landing-header-h);
+      height: calc(100vh - var(--landing-header-h));
+      display: block;
+      overflow: clip;
+      padding-top: clamp(1.25rem, 2.5vw, 2rem);
+    }
+
+    /* Copy in normal initial flow: fully visible at scroll=0, fades as
+       scroll progress advances. No time-based transitions: scroll drives
+       opacity directly so forward and reverse scrolls track 1:1. */
+    .landing-hero-scene[data-scene-active] .landing-hero-stage-copy {
+      position: relative;
+      opacity: calc(1 - var(--scene-progress) * 1.5);
+      transform: translate3d(0, calc(var(--scene-progress) * -3.5rem), 0);
+      will-change: opacity, transform;
+    }
+
+    /* Focused CTA or link restores copy visibility and interaction immediately */
+    .landing-hero-scene[data-scene-active] .landing-hero-stage-copy:focus-within {
+      opacity: 1 !important;
+      transform: none !important;
+      pointer-events: auto !important;
+      z-index: 10;
+    }
+
+    /* Pointer events remain active throughout mid-fade; only disabled when
+       copy has substantially faded out */
+    .landing-hero-scene[data-scene-active][data-scene-copy-faded] .landing-hero-stage-copy {
+      pointer-events: none;
+    }
+
+    /* Preview positioned absolutely with top based on measured copy height.
+       Progress translation brings it to ~24px below the sticky header at end.
+       Scale is calculated to fit full console + caption + caveat within the
+       sticky stage across standard and shorter desktop heights. */
+    .landing-hero-scene[data-scene-active] .landing-hero-preview-wrap {
+      position: absolute;
+      top: var(--preview-initial-top, 420px);
+      left: 0;
+      right: 0;
+      margin-inline: auto;
+      transform: translate3d(
+          0,
+          calc(-1 * var(--scene-progress) * var(--preview-travel, 380px)),
+          0
+        )
+        scale(
+          calc(
+            var(--preview-start-scale, 0.95) +
+              var(--scene-progress) * var(--preview-scale-delta, 0.05)
+          )
+        );
+      transform-origin: top center;
+      will-change: transform;
+    }
+  }
+}
+
 /* Soft blue atmospheric glow behind hero and preview. */
 .landing-hero::before {
   content: "";
@@ -740,6 +833,34 @@
   line-height: 1.6;
   color: hsl(var(--l-dim));
   border-top: 1px solid hsl(var(--l-line) / 0.6);
+}
+
+/* Unobtrusive scroll affordance for the pinned hero. Decorative only
+   (aria-hidden) and hidden on small/short viewports. */
+.landing-hero-scene-hint {
+  display: none;
+}
+
+@media (min-width: 64rem) and (min-height: 40rem) {
+  @media not (prefers-reduced-motion: reduce) {
+    .landing-hero-scene[data-scene-active] .landing-hero-scene-hint {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      position: absolute;
+      bottom: 1.25rem;
+      left: 0;
+      right: 0;
+      margin-inline: auto;
+      color: hsl(var(--l-dim));
+      font-size: 0.8125rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      opacity: calc(1 - var(--scene-progress, 0) * 4);
+      pointer-events: none;
+    }
+  }
 }
 
 /* Self-hosted/demo caveat sits low in the hero, under the preview. */
